@@ -4,8 +4,9 @@ Actor-x1 is a system that uses Communicating
 Sequential Process (CSP) invented by Tony Hoare
 In 1978 and is commonly termed an actor model.
 
-See [design.md](notes/design.md) and
+See [design.md](notes/design.md),
 [notes/README.md](notes/README.md)
+[acronyms & terms](notes/acronyms-terms.md)
 
 This is the main repo of a dual-repo convention for using
 a bot to help in the development of a coding project.
