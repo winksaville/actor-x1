@@ -1,28 +1,7 @@
 # Notes
 
-This directory contains various notes and documentation related to the project.
-Each file is organized by topic for easy reference.
+See [design.md](design.md)
 
-By default there are chores-*.md and todo.md. Chores are general notes
-about tasks and todo.md contains short term tasks and their status.
-
-In the future we I expect we may want to create a "notes"
-database to better manage the information, TBD.
-
-Examples chore file:
-```
-# Chores-01.md
-
-General maintenance tasks and considerations for the project see other files for
-more specific topics. A chore in a chores file provides quick information on the
-how and why of a particular chore. The section header is short and sweet
-and the title is appended with the version number of the app when the chore
-is completed.
-
-## Create an app that does something interesting (0.1.0)
-
-The app counts from 1 to 100, not to interesting.
-```
 
 ## jj tips
 

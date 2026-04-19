@@ -1,24 +1,26 @@
 # actor-x1
 
-This is the main repo of a dual-repo convention for using
-a bot to help in the development of a coding project. The goal
-is that this main repo contains the "what", while the partner
-bot repo contains "why" and "how". The key to the convention
-is each change is cross-referenced to the other. Thus there
-is a coherent story of the development of the project across time.
+Actor-x1 is a system that uses Communicating
+Sequential Process (CSP) invented by Tony Hoare
+In 1978 and is commonly termed an actor model.
 
-The beginnings of that tool is [vc-x1](https://github.com/winksaville/vc-x1)
-which currently does achieve this goal, but is being used as a
-first test bed.
+See [design.md](notes/design.md) and
+[notes/README.md](notes/README.md)
+
+This is the main repo of a dual-repo convention for using
+a bot to help in the development of a coding project.
 
 ## Cloning
 
-Use [vc-x1](https://github.com/winksaville/vc-x1) to clone
-the dual-repo project. It handles `git clone --recursive`,
-`jj` init for both repos, and the Claude Code symlink:
+Use `vc-x1 clone ..` which will clone and use `jj init`
+on both repos of the dual-repo project and sets up the
+symlink from
+`~/.claude/projects/<claude-encode-name-actor-x1/.claude>`
+to `<path-to-actor-x1>/.claude/` in the code repo.
 
+Example:
 ```
-vc-x1 clone winksaville/vc-template-x1
+vc-x1 clone git@github.com:winksaville/actor-x1
 ```
 
 ## jj Tips for Git Users
