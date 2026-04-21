@@ -47,3 +47,34 @@ Multi-step ladder (see [Versioning during development](../CLAUDE.md#versioning))
   and `iiac-perf/src/ticks.rs` emits a `compile_error!` on other
   arches. Development target is x86_64 so this is acceptable; the
   restriction is documented at the vendored module.
+
+## Goal1: single-thread ping-pong runtime (0.1.0-1)
+
+Implements Goal1 of Stage 1: two actors, one thread, ping-pong an
+empty [`Message`] for a caller-supplied duration in seconds, then
+report the message count and throughput.
+
+- `src/lib.rs`: `Message` unit struct, `Actor` trait
+  (`handle_message(&mut self, &mut dyn Context, Message)`),
+  `Context` trait (`send(dst_id: u32, msg: Message)`), and
+  `pub mod runtime`.
+- `src/runtime.rs`: `SingleThreadRuntime` owns a
+  `Vec<Box<dyn Actor>>` and a `VecDeque<(u32, Message)>`; `run_for`
+  pops a message, field-split-borrows `actors` and `queue`,
+  constructs a private `SingleCtx` wrapping the queue, dispatches,
+  counts. Terminates on deadline or queue drain. Unit tests cover
+  seed drain, bounded ping-pong count (11 = seed + 5·2), and
+  sequential id assignment.
+- `src/bin/goal1.rs`: CLI takes one positional `<duration_secs>`
+  f64; constructs two `PingPongActor`s (each replies once per
+  received message to its peer), seeds one message into actor 0,
+  runs, prints `goal1: <count> messages in <secs>s (<M msg/s>)`.
+
+Smoke run on this box: 0.5 s → ~19.3 M messages → ~38.7 M msg/s.
+
+### Deviation from the design sketch
+
+`struct Message {}` in `design.md` is realised as a unit struct
+`pub struct Message;` — equivalent externally, instantiates as
+`Message` rather than `Message {}`. Matches clippy's preference for
+empty types; trivial to convert back if literal match matters.
