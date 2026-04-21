@@ -1,12 +1,16 @@
 //! Goal1 binary: two actors on a single thread ping-pong an empty
-//! [`Message`] for a caller-supplied duration in seconds (f64).
+//! [`Message`] for a caller-supplied duration in seconds (f64),
+//! after an optional warmup phase. Prints messages-handled /
+//! throughput and a `tprobe2` band-table report of per-dispatch
+//! latency.
 //!
-//! Usage: `goal1 <duration_secs>`
+//! Usage: `goal1 --help`
 
 use std::time::Duration;
 
 use actor_x1::runtime::SingleThreadRuntime;
 use actor_x1::{Actor, Context, Message};
+use clap::Parser;
 
 /// Actor that, on every message received, sends exactly one message
 /// back to its configured peer.
@@ -21,25 +25,68 @@ impl Actor for PingPongActor {
     }
 }
 
-/// Parse the duration from argv, run two ping-pong actors for that
-/// long on one thread, and print messages handled plus throughput.
-fn main() {
-    let mut args = std::env::args().skip(1);
-    let duration_s: f64 = args
-        .next()
-        .expect("usage: goal1 <duration_secs>")
+/// CLI for goal1: single-thread two-actor ping-pong with warmup,
+/// per-dispatch probe batching, and ns-or-ticks band-table report.
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Cli {
+    /// Measurement window in seconds (runs after warmup).
+    #[arg(value_parser = parse_non_negative_secs)]
+    duration_s: f64,
+
+    /// Warmup duration in seconds before measurement. Runs the
+    /// same dispatch loop as the measurement phase (probe active)
+    /// so cache/branch-predictor/frequency land in the same state
+    /// by the time the probe is cleared and measurement begins.
+    #[arg(long, default_value_t = 10.0, value_parser = parse_non_negative_secs)]
+    warmup: f64,
+
+    /// Number of dispatches per probe scope. Larger values
+    /// amortize probe apparatus overhead and push stored tick
+    /// values into a range where the histogram's 0.1 %-relative
+    /// buckets resolve small variations.
+    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u64).range(1..))]
+    inner: u64,
+
+    /// Display probe values as raw ticks instead of nanoseconds.
+    #[arg(short = 't', long)]
+    ticks: bool,
+}
+
+/// `value_parser` helper: reject negative, NaN, and infinite values.
+fn parse_non_negative_secs(s: &str) -> Result<f64, String> {
+    let v: f64 = s
         .parse()
-        .expect("duration must be a non-negative number of seconds");
+        .map_err(|e: std::num::ParseFloatError| e.to_string())?;
+    if !v.is_finite() || v < 0.0 {
+        Err(format!("'{s}' is not a non-negative finite number"))
+    } else {
+        Ok(v)
+    }
+}
 
-    let duration = Duration::from_secs_f64(duration_s);
+/// Parse CLI, run warmup + measurement on two single-thread
+/// ping-pong actors, print message count + throughput, then
+/// render the per-dispatch band-table report.
+fn main() {
+    let cli = Cli::parse();
 
-    let mut rt = SingleThreadRuntime::new();
+    let mut rt = SingleThreadRuntime::new("goal1.dispatch");
     let a_id = rt.add_actor(Box::new(PingPongActor { peer_id: 1 }));
     let b_id = rt.add_actor(Box::new(PingPongActor { peer_id: 0 }));
     assert_eq!((a_id, b_id), (0, 1));
     rt.seed(a_id, Message);
 
-    let count = rt.run_for(duration);
-    let mmps = count as f64 / duration_s / 1e6;
-    println!("goal1: {count} messages in {duration_s:.3}s ({mmps:.3} M msg/s)");
+    // Warmup: same loop, probe active, records discarded at the boundary.
+    rt.run_for(Duration::from_secs_f64(cli.warmup), cli.inner);
+    rt.probe_mut().clear();
+
+    // Measurement.
+    let count = rt.run_for(Duration::from_secs_f64(cli.duration_s), cli.inner);
+    let mmps = count as f64 / cli.duration_s / 1e6;
+    println!(
+        "goal1: {count} messages in {:.3}s ({mmps:.3} M msg/s, inner={})",
+        cli.duration_s, cli.inner,
+    );
+    rt.probe_mut().report(cli.ticks);
 }

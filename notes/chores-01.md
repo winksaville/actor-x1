@@ -78,3 +78,116 @@ Smoke run on this box: 0.5 s → ~19.3 M messages → ~38.7 M msg/s.
 `pub struct Message;` — equivalent externally, instantiates as
 `Message` rather than `Message {}`. Matches clippy's preference for
 empty types; trivial to convert back if literal match matters.
+
+## Vendored perf probe + Goal1 instrumentation (0.1.0-2)
+
+Copies `tprobe2` and its transitive dependencies into the crate and
+wraps every `handle_message` dispatch with a probe scope so Goal1
+reports per-dispatch latency alongside message count.
+
+- `Cargo.toml`: version bump to 0.1.0-2; add `hdrhistogram = "7"` and
+  `minstant = "0.1"` dependencies.
+- `src/perf/mod.rs`: new module root; documents vendor source path
+  (`../iiac-perf/src`) and divergences (import paths, `// OK: …`
+  on `unwrap*`, one diagnostic string).
+- `src/perf/tprobe2.rs`: vendored from `iiac-perf/src/tprobe2.rs`.
+  Imports rewritten to `crate::perf::{band_table, ticks}`; two
+  `unwrap` calls gained `// OK: …` justifications.
+- `src/perf/band_table.rs`: vendored from `iiac-perf/src/band_table.rs`.
+  Imports rewritten to `crate::perf::fmt` and `crate::perf::ticks`;
+  `unwrap_or(0)` calls gained `// OK: …` justifications.
+- `src/perf/ticks.rs`: vendored unchanged except for the
+  `compile_error!` diagnostic now mentions `actor-x1 probes`.
+- `src/perf/ticks/x86_64.rs`: vendored unchanged.
+- `src/perf/fmt.rs`: extracted `fmt_commas` and `fmt_commas_f64`
+  from `iiac-perf/src/harness.rs` (lines 160–188) — avoids vendoring
+  the 393-line harness for two helpers. `unwrap_or(0)` gained a
+  `// OK: …` justification.
+- `src/lib.rs`: adds `pub mod perf;`.
+- `src/runtime.rs`: `SingleThreadRuntime::new(probe_name)` now takes
+  a name, embeds a `TProbe2`, and wraps each `handle_message` call
+  with `probe.start(dst_id as u64)` / `probe.end(id)`. `Default` impl
+  dropped (new takes an arg). `probe_mut()` exposes the probe for
+  end-of-run reporting. Unit tests pass a probe name.
+- `src/bin/goal1.rs`: new arg parser supports `-t` / `--ticks`
+  (raw-ticks display); runtime constructed as `"goal1.dispatch"`;
+  calls `rt.probe_mut().report(as_ticks)` after the dispatch loop.
+  Usage errors now `exit(2)` with a usage line instead of panicking.
+
+### Smoke measurements (release build)
+
+- `goal1 0.5` — 10.56 M messages in 0.5s (~21.1 M msg/s).
+  Per-dispatch: mean 9 ns, mean min-p99 9 ns, p99 max 67.5 µs
+  (likely an OS interrupt in the tail).
+- `goal1 0.5 -t` — 10.57 M messages in 0.5s (~21.1 M msg/s).
+  Per-dispatch: mean 35 tk, mean min-p99 34 tk, p99 max 114,687 tk.
+
+Adding the probe cuts throughput roughly in half vs. 0.1.0-1
+(~38.7 → ~21.1 M msg/s). The bot thinks the delta is dominated by
+two `rdtsc` reads plus `Vec::push` per dispatch (~20 ns of the
+~47 ns per-dispatch cost); the 9 ns measured by the probe is the
+`handle_message` body alone.
+
+## Inner batching, warmup, clap (0.1.0-3)
+
+Adds CLI polish and measurement-quality improvements to Goal1.
+Scope:
+
+- **Inner batching** — one probe scope now covers `--inner N`
+  consecutive dispatches (default 1). At larger `N` the probe's
+  two-`rdtsc`-plus-push apparatus cost is amortized, and stored
+  tick values land in a range where the histogram's 0.1 %-relative
+  buckets actually resolve jitter.
+- **Warmup** — `--warmup SECS` (default **10.0**) runs the same
+  dispatch loop with the probe active, then clears probe state;
+  measurement phase inherits stable-state CPU freq / cache /
+  branch-predictor conditions. Warmup message counts are never
+  reported.
+- **clap** — hand-rolled arg parsing replaced with a derive-based
+  `Cli`. Validates non-negative finite `duration_s` and `warmup`;
+  enforces `inner ≥ 1`. Auto-generated `--help` / `--version`.
+- **TProbe2 additions** (vendored-code divergence from iiac-perf):
+  - `Record` gains a `batch: u64` field.
+  - `TProbe2::end_batch(id, n)` appends with `batch = n`; existing
+    `end(id)` sets `batch = 1`.
+  - `TProbe2::report` now divides stored deltas by `batch` at
+    drain time so the histogram always holds per-event cost,
+    regardless of scope granularity.
+  - `TProbe2::clear()` resets records buffer and histogram;
+    called between warmup and measurement.
+
+File-level edits:
+
+- `Cargo.toml`: bump to 0.1.0-3; add
+  `clap = { version = "4", features = ["derive", "wrap_help"] }`.
+- `src/perf/tprobe2.rs`: `Record.batch`, `end_batch`, `clear`,
+  per-event division in `report`. Doc comment at file head lists
+  divergences from upstream. Three new tests
+  (`end_batch_stores_batch_size`, `report_divides_batched_delta`,
+  `clear_empties_records_and_hist`).
+- `src/runtime.rs`: `run_for(duration, inner)` wraps each batch
+  of `inner` dispatches in a probe scope; site_id is the first
+  `dst_id` in the batch. Partial trailing batches (queue empties
+  mid-scope) are discarded — scope dropped, count not incremented
+  — so throughput numbers reflect whole-batch work only. New test
+  `partial_trailing_batch_is_dropped` covers the drop path.
+- `src/bin/goal1.rs`: clap-derive `Cli` with `duration_s`,
+  `--warmup`, `--inner`, `-t/--ticks`. Runs warmup, clears probe,
+  runs measurement, prints count/throughput (now also reports
+  `inner=N`), then calls `probe.report`.
+
+### Smoke measurements (release, `--warmup 0`)
+
+| Args | Throughput | Probe mean (min-p99) | Notes |
+|---|---|---|---|
+| `0.5` (inner=1) | 19.7 M msg/s | 9 ns | Apparatus overhead dominates, distribution stuck in two spike buckets |
+| `0.5 --inner 1000` | 205 M msg/s | 5 ns | ~10× throughput; per-dispatch mean drops because apparatus is amortized |
+| `0.5 --inner 1000 -t` | 204 M msg/s | 18 tk | Ticks view; tail p99-max 449 tk vs ~115 k tk at inner=1 (batch smooths OS interrupts) |
+
+Warmup wall-clock sanity: `goal1 0.3 --warmup 1 --inner 1000` ran
+in 1.33s total. Argv error paths (`-1`, `--inner 0`, `--warmup nan`)
+all exit 2 with clap-formatted messages.
+
+The bot thinks the inner=1 vs inner=1000 gap (9 ns vs 5 ns
+per-event) is ~4 ns of apparatus overhead; 0.1.0-4's overhead
+calibration will confirm that estimate directly.

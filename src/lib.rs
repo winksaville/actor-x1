@@ -12,6 +12,7 @@
 //! - [`runtime`]: concrete runtimes (single-thread for Goal1; the
 //!   multi-thread runtime will land in 0.1.0-3).
 
+pub mod perf;
 pub mod runtime;
 
 /// Empty unit-type message exchanged between Stage 1 actors.
