@@ -243,3 +243,37 @@ misleading; deferred for now.
 Further modification of the vendored `src/perf/band_table.rs`.
 Noted in the perf module's divergence list; already has other
 actor-x1-specific edits (`// OK:` comments, import paths).
+
+## CLI polish: help width + version banner (0.1.0-5)
+
+Two small quality-of-life tweaks to the `goal1` CLI.
+
+### Help width cap at 80 cols
+
+clap's default help-width uses the terminal width, which on wide
+terminals produces hard-to-scan long lines for the `--warmup` and
+`--inner` descriptions. `max_term_width = 80` caps rendering at
+80 columns while still using terminal width if smaller.
+
+### Version banner
+
+First line of `goal1` output — and of `goal1 -h` — is now
+`{CARGO_PKG_NAME} {CARGO_PKG_VERSION}` (e.g. `actor-x1 0.1.0-5`),
+matching what `--version` already prints. Helps identify which
+build produced a given result sheet (or which help text a user is
+reading) when lines are pasted out of context. The existing
+`goal1: …` line below carries the binary identity, so the banner
+doesn't repeat "goal1". Implemented in two places: a `println!`
+at the top of `main` for normal runs, and clap's `before_help`
+attribute for help output (`concat!(env!(CARGO_PKG_NAME), " ",
+env!(CARGO_PKG_VERSION))` — compile-time concat of package env
+vars).
+
+### File-level edits
+
+- `Cargo.toml`: bump to 0.1.0-5.
+- `src/bin/goal1.rs`: extend the `Cli` struct's `#[command(...)]`
+  attribute with `max_term_width = 80` and
+  `before_help = concat!(env!("CARGO_PKG_NAME"), " ", env!("CARGO_PKG_VERSION"))`;
+  `println!` the same banner at the top of `main` for
+  non-help runs.

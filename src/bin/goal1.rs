@@ -28,7 +28,13 @@ impl Actor for PingPongActor {
 /// CLI for goal1: single-thread two-actor ping-pong with warmup,
 /// per-dispatch probe batching, and ns-or-ticks band-table report.
 #[derive(Parser, Debug)]
-#[command(version, about, long_about = None)]
+#[command(
+    version,
+    about,
+    long_about = None,
+    max_term_width = 80,
+    before_help = concat!(env!("CARGO_PKG_NAME"), " ", env!("CARGO_PKG_VERSION")),
+)]
 struct Cli {
     /// Measurement window in seconds (runs after warmup).
     #[arg(value_parser = parse_non_negative_secs)]
@@ -70,6 +76,8 @@ fn parse_non_negative_secs(s: &str) -> Result<f64, String> {
 /// render the per-dispatch band-table report.
 fn main() {
     let cli = Cli::parse();
+
+    println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"),);
 
     let mut rt = SingleThreadRuntime::new("goal1.dispatch");
     let a_id = rt.add_actor(Box::new(PingPongActor { peer_id: 1 }));

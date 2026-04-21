@@ -1,6 +1,6 @@
 [package]
 name = "actor-x1"
-version = "0.1.0-4"
+version = "0.1.0-5"
 edition = "2024"
 description = "An experiment in the actor model in Rust (Communicating Sequential Processes, Hoare 1978)."
 license = "MIT OR Apache-2.0"
