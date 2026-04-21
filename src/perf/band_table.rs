@@ -73,18 +73,26 @@ pub(crate) fn render(kind: &str, name: &str, hist: &Histogram<u64>, as_ticks: bo
 
     let mut rows: Vec<BandRow> = Vec::new();
     for i in 0..n_bands {
-        if band_count[i] == 0 {
-            continue;
-        }
-        let mean_val = band_sum[i] as f64 / band_count[i] as f64;
-        let range_raw = band_last[i] - band_first[i] + 1;
+        let count = band_count[i];
+        let (first_v, last_v, range_v, mean_v) = if count == 0 {
+            (0.0, 0.0, 0.0, 0.0)
+        } else {
+            let mean_val = band_sum[i] as f64 / count as f64;
+            let range_raw = band_last[i] - band_first[i] + 1;
+            (
+                conv(band_first[i]),
+                conv(band_last[i]),
+                conv(range_raw),
+                conv_f(mean_val),
+            )
+        };
         rows.push(BandRow {
             label: format!("{}-{}", BOUNDARY_NAMES[i], BOUNDARY_NAMES[i + 1]),
-            first: fmt_commas_f64(conv(band_first[i]), 0),
-            last: fmt_commas_f64(conv(band_last[i]), 0),
-            range: fmt_commas_f64(conv(range_raw), 0),
-            count: fmt_commas(band_count[i]),
-            mean: fmt_commas_f64(conv_f(mean_val), 0),
+            first: fmt_commas_f64(first_v, 0),
+            last: fmt_commas_f64(last_v, 0),
+            range: fmt_commas_f64(range_v, 0),
+            count: fmt_commas(count),
+            mean: fmt_commas_f64(mean_v, 0),
         });
     }
 
@@ -92,13 +100,13 @@ pub(crate) fn render(kind: &str, name: &str, hist: &Histogram<u64>, as_ticks: bo
         .iter()
         .map(|r| r.label.len())
         .max()
-        .unwrap_or(0) // OK: sample_count==0 returned above; rows is non-empty here
+        .unwrap_or(0) // OK: rows always contains n_bands=12 entries after the loop above
         .max("stdev min-p99".len());
-    let first_w = rows.iter().map(|r| r.first.len()).max().unwrap_or(0); // OK: rows non-empty (see above)
-    let last_w = rows.iter().map(|r| r.last.len()).max().unwrap_or(0); // OK: rows non-empty (see above)
-    let range_w = rows.iter().map(|r| r.range.len()).max().unwrap_or(0); // OK: rows non-empty (see above)
-    let count_w = rows.iter().map(|r| r.count.len()).max().unwrap_or(0); // OK: rows non-empty (see above)
-    let mean_w = rows.iter().map(|r| r.mean.len()).max().unwrap_or(0); // OK: rows non-empty (see above)
+    let first_w = rows.iter().map(|r| r.first.len()).max().unwrap_or(0); // OK: rows always contains n_bands=12 entries
+    let last_w = rows.iter().map(|r| r.last.len()).max().unwrap_or(0); // OK: rows always contains n_bands=12 entries
+    let range_w = rows.iter().map(|r| r.range.len()).max().unwrap_or(0); // OK: rows always contains n_bands=12 entries
+    let count_w = rows.iter().map(|r| r.count.len()).max().unwrap_or(0); // OK: rows always contains n_bands=12 entries
+    let mean_w = rows.iter().map(|r| r.mean.len()).max().unwrap_or(0); // OK: rows always contains n_bands=12 entries
 
     const INDENT: &str = "    ";
     const GAP: &str = "    ";

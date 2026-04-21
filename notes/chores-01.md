@@ -189,5 +189,57 @@ in 1.33s total. Argv error paths (`-1`, `--inner 0`, `--warmup nan`)
 all exit 2 with clap-formatted messages.
 
 The bot thinks the inner=1 vs inner=1000 gap (9 ns vs 5 ns
-per-event) is ~4 ns of apparatus overhead; 0.1.0-4's overhead
+per-event) is ~4 ns of apparatus overhead; 0.1.0-5's overhead
 calibration will confirm that estimate directly.
+
+## Always render all 12 percentile bands (0.1.0-4)
+
+Previously the renderer skipped any band where no hdrhistogram
+bucket was assigned by mid-rank (`if band_count[i] == 0 { continue;
+}`), so tight distributions produced reports with only 3–5 visible
+rows and it was hard to tell at a glance whether a band was
+genuinely empty or just not rendered. This step always emits all
+12 rows (`min-p1` through `p99-max`); empty bands render as zeros
+in every numeric column.
+
+File-level edits:
+
+- `Cargo.toml`: bump to 0.1.0-4.
+- `src/perf/band_table.rs`: drop the skip-on-empty guard; the band
+  loop now computes `(first_v, last_v, range_v, mean_v)` from
+  either the band aggregates (for non-empty bands) or `(0, 0, 0, 0)`
+  for empty ones. `unwrap_or(0)` `// OK: …` justifications updated
+  ("rows always contains n_bands=12 entries").
+
+### Display example (inner=10, 0.5 s)
+
+All 12 rows always visible — the zero-valued bands make the
+distribution's shape explicit:
+
+```
+    min-p1        4 ns        4 ns        0 ns        8,712     4 ns
+    p1-p10        0 ns        0 ns        0 ns            0     0 ns
+    ...
+    p40-p50       5 ns        5 ns        0 ns    4,794,952     5 ns
+    ...
+    p99-max       7 ns    3,197 ns    3,190 ns       61,924    10 ns
+```
+
+### Caveat — this only fixes visibility, not the bucket-into-band
+mapping
+
+The renderer still walks hdrhistogram buckets and assigns each
+bucket to exactly one band by cumulative mid-rank. In the inner=10
+smoke above, 4,794,952 samples (~89 %) land in `p40-p50` while
+`p1-p10` through `p30-p40` stay at zero — the single hot bucket at
+"5 ns" got attributed to one band, not spread across the percentile
+range its samples actually span. The bot thinks the principled
+fix (switch to `hist.value_at_quantile(q)` per band boundary) is
+worth considering if the zero-band display starts feeling
+misleading; deferred for now.
+
+### Divergence from upstream
+
+Further modification of the vendored `src/perf/band_table.rs`.
+Noted in the perf module's divergence list; already has other
+actor-x1-specific edits (`// OK:` comments, import paths).
