@@ -40,25 +40,23 @@ durable context in CLAUDE.md (or committed `notes/`) instead.
 
 ## Speculation marker
 
-Durable text the bot writes — CLAUDE.md, `notes/`, commit
-bodies, chores sections — should stick to observations and
-direct descriptions of the code or data. If a mechanism,
-hypothesis, or causal claim enters the text, prefix it with
-"The bot thinks ..." so a reader can tell the measured from
-the inferred.
+Durable text the bot writes — CLAUDE.md, `notes/`, commit bodies,
+chores sections — should stick to observations and direct descriptions
+of the code or data. If a mechanism, hypothesis, or causal claim
+enters the text, prefix it with "The bot thinks ..." so a reader can
+tell the measured from the inferred.
 
-**Why:** unmarked speculation reads like evidence, and a future
-reader (or the bot on a later session) can pick it up as a
-known fact when it's not. Measured / inferred is a distinction
-worth keeping visible in the written record.
+**Why:** unmarked speculation reads like evidence, and a future reader
+(or the bot on a later session) can pick it up as a known fact when
+it's not. Measured / inferred is a distinction worth keeping visible
+in the written record.
 
 **How to apply:** observations and factual descriptions need no
-marker. Prefix with "The bot thinks ..." (or a close variant
-like "The bot's guess is ...") when the claim is a mechanism
-("X wins because Y caches better"), a cause ("the drift was
-due to thermal state"), a prediction ("this should scale
-linearly"), or any reasoning not directly supported by the
-data on hand.
+marker. Prefix with "The bot thinks ..." (or a close variant like
+"The bot's guess is ...") when the claim is a mechanism ("X wins
+because Y caches better"), a cause ("the drift was due to thermal
+state"), a prediction ("this should scale linearly"), or any
+reasoning not directly supported by the data on hand.
 
 ## Committing
 
@@ -144,14 +142,14 @@ proposing the commit block. Changes during review are the norm,
 not the exception; proposing commit text too early creates noise
 and signals that I consider the work done when it usually isn't.
 
-This applies per-step in a multi-step flow too — each dev step
-gets a review pause before its commit block appears.
+This applies per-step in a multi-step flow too — each step gets a
+review pause before its commit block appears.
 
 Signals that review is complete include explicit approval ("let's
-commit", "looks good, commit it") **and any directive to start
-the next step** ("do dev4", "next", "go dev(N+1)"). In that case
-the previous step must be committed first — always commit the
-current step before starting the next; don't ask.
+commit", "looks good, commit it") **and any directive to start the
+next step** ("do step 4", "next", "go N+1"). In that case the
+previous step must be committed first — always commit the current
+step before starting the next; don't ask.
 
 ### Notes references
 
@@ -160,9 +158,39 @@ See [Todo format](notes/README.md#todo-format) for details.
 
 ### Versioning
 
-Every change must start with a version bump. See
-[Versioning during development](notes/README.md#versioning-during-development)
-for details. Get user approval on single-step vs multi-step before starting.
+Every plan must start with a version bump. Choose the approach based
+on scope:
+
+- **Single-step** (recommended for mechanical/focused changes): bump
+  directly to `X.Y.Z`, implement in one commit. Simpler history.
+- **Multi-step** (for exploratory/large changes): bump to `X.Y.Z-0`,
+  implement across multiple commits incrementing the numeric
+  suffix. The final commit drops the suffix.
+
+The plan should recommend one approach and get user approval before
+starting.
+
+For multi-step:
+
+1. Bump version to `X.Y.Z-0` with the plan and commit as a chore
+   marker.
+2. Implement in one or more `X.Y.Z-N` commits (increment N as
+   needed).
+3. Final commit bumps to `X.Y.Z` (no suffix), updates
+   `notes/todo.md` and `notes/chores-*.md` — this is the "done"
+   marker.
+
+**Why numeric suffixes (`-0`, `-1`, …) rather than `-devN`:**
+semver pre-release identifiers may consist of a single numeric
+component, and they compare numerically per spec. So
+`X.Y.Z-1 < X.Y.Z-2 < … < X.Y.Z` correctly orders the dev ladder
+below the done marker. Cargo accepts this form. The `-dev` prefix
+adds no information the git log doesn't already convey and
+doubles typing per commit.
+
+The final release commit (no suffix) signals completion rather than
+amending prior commits. This keeps history readable and makes it easy
+to see which commits were exploratory vs final.
 
 ### Chores section headers
 
@@ -172,7 +200,7 @@ Chores section headers use trailing version format:
 ## Description (X.Y.Z)
 ```
 
-Example: `## Add `fn claude-symlink` (0.27.0)`
+Example: `` ## Add `fn claude-symlink` (0.27.0) ``
 
 ### Pre-commit checklist
 
@@ -181,15 +209,79 @@ Before proposing a commit, run all of the following and fix any issues:
 1. `cargo fmt`
 2. `cargo clippy`
 3. `cargo test`
-4. `cargo test --release` — release-mode inlining and OoO scheduling
-   can expose bugs masked in debug; run both for hot-path-sensitive
-   code.
-5. `cargo install --path .` (if applicable)
-6. Retest after install
-7. Update `notes/todo.md` — add to `## Done` if completing a task
-8. Update `notes/chores-*.md` — add a subsection describing the change
-9. Update `notes/README.md` — if functionality changed (new flags,
+4. `cargo install --path .` (if applicable)
+5. Retest after install
+6. Update `notes/todo.md` — add to `## Done` if completing a task
+7. Update `notes/chores-*.md` — add a subsection describing the change
+8. Update `notes/README.md` — if functionality changed (new flags,
    new subcommands, changed behavior)
+
+## Code Conventions
+
+### Doc comments on every file, function, and method
+
+Every `.rs` file must begin with a `//!` module docstring. Every
+function and method must have a `///` doc comment. Keep them brief —
+one sentence of purpose is often enough; the discipline is that the
+comment exists, not that it be long.
+
+This is a deliberate override of the generic "write no comments"
+default that applies to inline `//` comments. Doc comments on the
+module / item surface are expected; inline explanatory comments
+inside function bodies remain discouraged unless they capture a
+non-obvious WHY.
+
+### `// OK: …` comments on `unwrap*` calls (Rust)
+
+Non-test code that calls `.unwrap()`, `.unwrap_or(…)`,
+`.unwrap_or_default()`, or `.unwrap_or_else(…)` must have a trailing
+`// OK: …` comment that justifies why the call is acceptable.
+
+- `// OK: <specific reason>` — document the real precondition,
+  invariant, or domain reason. Preferred whenever the reason isn't
+  self-evident.
+- `// OK: obvious` — the default is self-evident from context (e.g.
+  `desc.lines().next().unwrap_or("")` — empty desc → empty title).
+
+Bare `// OK` is not used (reads like a truncated comment).
+Abbreviations (e.g. `SE`) are not used because they require a decoder
+ring for readers seeing the code out of context.
+
+For provably-unreachable `.unwrap()` calls, also prefix with
+`#[allow(clippy::unwrap_used)]` so the site stays silent if we enable
+the project-wide `clippy::unwrap_used` lint later.
+
+```rust
+let max = stderr_level.unwrap_or(LevelFilter::Info); // OK: default verbosity when -v/-vv absent
+let first_line = desc.lines().next().unwrap_or("");  // OK: obvious
+
+match matches.len() {
+    1 => {
+        #[allow(clippy::unwrap_used)]
+        // OK: `1 =>` arm guarantees matches.len() == 1
+        Ok(TitleMatch::One(matches.into_iter().next().unwrap()))
+    }
+    // ...
+}
+```
+
+Tests (`#[cfg(test)]`) are exempt — panicking on setup failure is the
+correct test behavior.
+
+### Ask for clarification on ambiguous input
+
+When user input is ambiguous or missing necessary detail, stop and
+ask a specific question. Do not proceed on a guess and hope the
+result lands right — a clarifying question costs a few seconds;
+redoing misaligned work costs much more.
+
+### Recognize when stuck
+
+If a simple task has eaten 5+ minutes of thinking or back-and-forth
+without progress, stop. Summarize what's blocking — unclear
+requirements, unfamiliar API surface, conflicting signals — and ask.
+Continued flailing produces worse outcomes than a direct "I'm stuck
+on X."
 
 ## ochid Trailers
 
@@ -207,20 +299,21 @@ is app repo, second is `.claude`).
 
 Two-checkpoint flow with explicit user approval at each stage.
 
-**Run this flow after every step** — not only at session end. Single-step
-and multi-step changes are of equal importance: a single-step change is
-one flow; a multi-step change is one flow per `-devN` commit plus one
-for the final release commit. Each step gets its own commits, its own
-push, and its own finalize — so dev markers land on the remote and in
-the `.claude` history as they happen rather than being batched until
-the end.
+**Run this flow after every step** — not only at session end.
+Single-step and multi-step changes are of equal importance: a
+single-step change is one flow; a multi-step change is one flow per
+`X.Y.Z-N` commit plus one for the final release commit. Each step
+gets its own commits, its own push, and its own finalize — so dev
+markers land on the remote and in the `.claude` history as they
+happen rather than being batched until the end.
 
 ### Checkpoint 1: Commit
 
-Prepare both commit commands and **present them for approval**. Use the
-**same title** for both commits so they're easy to correlate. The body
-can differ: the app repo body should summarize code changes; the bot
-session repo body should note what was done in the session.
+Prepare both commit commands and **present them for approval**. Use
+the **same title** for both commits so they're easy to correlate.
+The body can differ: the app repo body should summarize code
+changes; the bot session repo body should note what was done in the
+session.
 
 On approval, execute the commits and set bookmarks:
 
@@ -249,23 +342,23 @@ handles that push after squashing trailing writes.
 ### After finalize: stop and wait
 
 After `vc-x1 finalize` is launched — **whether mid-session per-step
-or at session end** — you **MUST NEVER** proceed to a next step,
-edit files, run tools, or emit any text (prose, recaps,
-acknowledgements), until the user explicitly directs you to continue.
-Treat finalize as a hard stop for the whole turn. Any final words
-(e.g. "next is ...") must be said in the approval prompt *before*
-executing finalize; the finalize `Bash` call is the last thing in the
-turn and nothing follows it.
+or at session end** — you **MUST NEVER** proceed to a next step, edit
+files, run tools, or emit any text (prose, recaps, acknowledgements),
+until the user explicitly directs you to continue. Treat finalize as
+a hard stop for the whole turn. Any final words (e.g. "next is ...")
+must be said in the approval prompt *before* executing finalize; the
+finalize `Bash` call is the last thing in the turn and nothing
+follows it.
 
 This holds even when the next step seems obvious (e.g. "next is
-dev-N+1" or "now I should bump the version and commit the release").
+N+1" or "now I should bump the version and commit the release").
 Wait. The user controls cadence — every push+finalize is a checkpoint
 they may want to inspect, think about, hand off, or take a break at.
-Auto-proceeding bypasses that checkpoint and produces unwanted
-writes between finalize and the next explicit instruction.
+Auto-proceeding bypasses that checkpoint and produces unwanted writes
+between finalize and the next explicit instruction.
 
-Exceptions to this rule may emerge later but are not authorized
-at this stage. Until told otherwise, treat as absolute.
+Exceptions to this rule may emerge later but are not authorized at
+this stage. Until told otherwise, treat as absolute.
 
 ### Late changes after push
 
@@ -281,10 +374,10 @@ jj git push --bookmark <bookmark> -R .
 
 ### Finalize the .claude repo
 
-The **very last action** in a session is to finalize the `.claude` repo.
-`--squash @,@-` squashes the working copy into the session commit.
-The delay gives a safety margin against any pending writes. Always use a
-short relative path for `--repo`.
+The **very last action** in a session is to finalize the `.claude`
+repo. `--squash @,@-` squashes the working copy into the session
+commit. The delay gives a safety margin against any pending writes.
+Always use a short relative path for `--repo`.
 
 **Nothing should happen after finalize** — no memory writes, no tool
 calls, no additional output. If any work is done after finalize, run
