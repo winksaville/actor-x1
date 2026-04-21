@@ -4,7 +4,7 @@
 
 Actor-x1 is a system that uses Communicating
 Sequential Process (CSP) invented by Tony Hoare
-In 1978 and is commonly termed an actor model.
+In 1978 and is commonly termed the actor model.
 
  - There will be a management system (MS) that:
 
@@ -17,7 +17,7 @@ In 1978 and is commonly termed an actor model.
 
  - A runtime that drives the system and provides
    resources and services for the system
-   - interfaces between MS and the application
+   - interfaces between the manager and the application
  
  - One or more actors running on one or more
    threads. Each actor adheres to these
@@ -27,7 +27,7 @@ In 1978 and is commonly termed an actor model.
      must run to completion as quickly as possible.
    - The handler() never ever blocks
    - If a handler() has tasks that take to much time
-     a technique that can be used is to spawn a
+     a technique that can be used is to spawn
      threads to do work. That thread would then use
      messages to communicate with its parent and
      other actors as it does its work.
@@ -52,15 +52,16 @@ Actor implements an Actor trait
 trait Actor {
   // Handles a message 
   fn handle_message(msg: Message)
+
+  // other methods..
 }
 
 ### Goal1
 
 - Run two actors on one thread.
 - A single message which is an empty struct
-- A single queue between the two actors.
 - Message ping pongs between the two actors
-  for a time in seconds specified as a f64
+  for duration in seconds specified as a f64
   in seconds from the command line
 
 ## Goal2
@@ -94,6 +95,8 @@ trait Actor {
 
   // Handle a message
   fn handle_message(msg: mut Message);
+
+  // other methods..
 }
 
 ### Goal1
@@ -105,4 +108,3 @@ trait Actor {
 
 ### Goal2
 - Same as Goal1 but each actor on a separate thread.
-
