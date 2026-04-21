@@ -5,12 +5,13 @@ and reference links to more details.
 
 ## In Progress
 
+- Stage 1 runtime PoC [[2]]
+
 ## Todo
 
 See [Foramt details](README.md#todo-format)
 
 - Initial design [[1]]
-- PoC implementation of a runtime
 - PoC implementation of a manager
 
 ## Done
@@ -22,3 +23,4 @@ and older `## Done` sections are moved to [done.md](done.md) to keep this file s
 # References
 
 [1]: design.md
+[2]: chores-01.md#stage-1-runtime--plan-marker-010-0
