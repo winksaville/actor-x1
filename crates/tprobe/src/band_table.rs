@@ -8,13 +8,13 @@
 //! module provides a single implementation both can call into.
 //!
 //! Display unit is chosen by `as_ticks`: `false` converts stored
-//! tick values to nanoseconds via [`crate::perf::ticks::ticks_per_ns`];
+//! tick values to nanoseconds via [`crate::ticks::ticks_per_ns`];
 //! `true` shows raw ticks.
 
 use hdrhistogram::Histogram;
 
-use crate::perf::fmt::{fmt_commas, fmt_commas_f64};
-use crate::perf::ticks;
+use crate::fmt::{fmt_commas, fmt_commas_f64};
+use crate::ticks;
 
 const BOUNDARY_PCTS: &[f64] = &[
     0.0, 0.01, 0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90, 0.99, 1.0,

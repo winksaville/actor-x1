@@ -656,3 +656,81 @@ behaviorally. This step only reshuffles the file layout so that
 - `cargo install --path crates/actor-x1` replaces the prior
   `actor-x1 v0.2.0-0` install; `goal1 --version` and
   `goal2 --version` both report `actor-x1 0.2.0-1`.
+
+## Move perf into tprobe crate (0.2.0-2)
+
+Carries out the body of the `0.2.0` ladder: `src/perf/*` moves
+from `crates/actor-x1/src/` into `crates/tprobe/src/`; perf
+dependencies migrate with the code; actor-x1 picks `tprobe` up
+as a path dependency. Behavior unchanged — tests and binaries
+run the same workloads with identical output modulo the version
+banner. The `TProbe2 → TProbe` rename is deliberately deferred
+to `0.2.0-3`.
+
+- `Cargo.lock`: updated by cargo for the new dep graph.
+- `crates/actor-x1/Cargo.toml`: version `0.2.0-1` → `0.2.0-2`;
+  drops `core_affinity`, `hdrhistogram`, `minstant`; adds
+  `tprobe = { path = "../tprobe" }`.
+- `crates/actor-x1/src/lib.rs`: drops `pub mod perf;`.
+- `crates/actor-x1/src/runtime.rs`: `use crate::perf::TProbe2`
+  → `use tprobe::TProbe2`; `crate::perf::pin::pin_current(...)`
+  → `tprobe::pin::pin_current(...)`. `cargo fmt` reordered the
+  import block (local `crate::` before external `tprobe`) per
+  rustfmt's group-ordering.
+- `crates/actor-x1/src/bin/goal1.rs`: `use actor_x1::perf::{self, pin, ticks}`
+  → `use tprobe::{self as perf, pin, ticks}`. Call sites (e.g.
+  `perf::calibrate()`) unchanged — the `self as perf` alias
+  preserves them.
+- `crates/actor-x1/src/bin/goal2.rs`: same import rewrite as
+  goal1.
+- `crates/tprobe/Cargo.toml`: version bumped `0.1.0-0` → `0.1.0`
+  (skeleton → first functional release); adds `core_affinity`,
+  `hdrhistogram`, `minstant` to `[dependencies]`.
+- `crates/tprobe/src/lib.rs`: rewritten from docstring-only stub
+  to the full module root — merges the vendored-from-iiac-perf
+  notes previously in `src/perf/mod.rs`, declares the six
+  submodules (`band_table`, `fmt`, `overhead`, `pin`, `ticks`,
+  `tprobe2`), and re-exports `Overhead` / `calibrate` /
+  `TProbe2` / `TProbe2RecId` at the crate root.
+- `crates/tprobe/src/band_table.rs`, `fmt.rs`, `overhead.rs`,
+  `pin.rs`, `ticks.rs`, `ticks/x86_64.rs`, `tprobe2.rs`: moved
+  verbatim from `crates/actor-x1/src/perf/`. Internal imports
+  rewritten — every `crate::perf::x` (both `use` lines and
+  doc-link references) becomes `crate::x` since within `tprobe`
+  the crate root *is* what `perf/mod.rs` used to be.
+
+### Design decisions recorded here
+
+- **`tprobe` version bumps `0.1.0-0` → `0.1.0`** at this step
+  rather than mirroring actor-x1's `-N` ladder. tprobe's own
+  history is "skeleton → populated", which is a single one-step
+  release in its own right. Drawing its version clock separately
+  from actor-x1's matches the "each crate versions itself"
+  expectation callers have of any Cargo dep.
+- **`use tprobe::{self as perf, pin, ticks}`** in the binaries
+  preserves `perf::calibrate()` at the call site. Could have
+  been rewritten to `tprobe::calibrate()` — chose the alias to
+  keep the move diff (this step) minimal so `0.2.0-3`'s rename
+  sweep is the only place the identifier changes. The alias
+  disappears when the bot thinks the call site should read
+  `tprobe::…` directly, which is a follow-up worth considering
+  after the rename lands.
+- **Imports inside tprobe drop the `perf::` segment** rather
+  than keeping a nominal `perf` submodule at `crate::perf`. A
+  standalone crate's root *is* the top of the namespace; adding
+  an intermediate `perf` module inside `tprobe` would be
+  redundant and would force every call site to say
+  `tprobe::perf::x` — worse in every direction.
+
+### Verification
+
+- `cargo fmt` clean after one small auto-reorg in
+  `runtime.rs` (see bullet above).
+- `cargo clippy --all-targets -- -D warnings` clean across both
+  members.
+- `cargo test` — 22 pass (5 in actor-x1 runtime tests + 17 in
+  tprobe's moved unit tests) = 22/22. Same count as before the
+  move, confirming no test was lost.
+- `cargo install --path crates/actor-x1` replaces the prior
+  `actor-x1 v0.2.0-1` install; `goal1 --version` and
+  `goal2 --version` both report `actor-x1 0.2.0-2`.

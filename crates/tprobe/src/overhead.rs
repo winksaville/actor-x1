@@ -40,13 +40,13 @@
 //! actually measuring, and the `black_box(1)` loop_per_iter
 //! doesn't model it anyway.
 //!
-//! [`TProbe2`]: crate::perf::TProbe2
-//! [`TProbe2::report`]: crate::perf::TProbe2::report
+//! [`TProbe2`]: crate::TProbe2
+//! [`TProbe2::report`]: crate::TProbe2::report
 
 use std::hint::black_box;
 use std::time::{Duration, Instant};
 
-use crate::perf::ticks;
+use crate::ticks;
 
 /// Calibration warmup iterations — lets CPU frequency boost ramp
 /// before the first real sample.
@@ -69,7 +69,7 @@ pub const N_HIGH: u64 = 10_000;
 /// a reference to [`TProbe2::report`] (as `Option<&Overhead>`) to
 /// get framing subtracted from each stored per-event value.
 ///
-/// [`TProbe2::report`]: crate::perf::TProbe2::report
+/// [`TProbe2::report`]: crate::TProbe2::report
 #[derive(Debug, Clone, Copy)]
 pub struct Overhead {
     /// Fitted per-scope framing cost — the bias on every stored

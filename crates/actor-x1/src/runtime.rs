@@ -8,8 +8,8 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use crate::perf::TProbe2;
 use crate::{Actor, Context, Message};
+use tprobe::TProbe2;
 
 /// Single-threaded runtime: all actors run on the calling thread,
 /// sharing one FIFO message queue. Dispatch loops until either the
@@ -330,7 +330,7 @@ impl MultiThreadRuntime {
             let h = thread::Builder::new()
                 .name(format!("actor-{id}"))
                 .spawn(move || {
-                    crate::perf::pin::pin_current(pin_target);
+                    tprobe::pin::pin_current(pin_target);
                     let actor = factory();
                     actor_loop(actor, rx, peers, probe_name)
                 })

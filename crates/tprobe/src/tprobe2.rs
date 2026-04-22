@@ -31,9 +31,9 @@
 
 use hdrhistogram::Histogram;
 
-use crate::perf::band_table;
-use crate::perf::overhead::Overhead;
-use crate::perf::ticks;
+use crate::band_table;
+use crate::overhead::Overhead;
+use crate::ticks;
 
 /// Opaque handle returned by [`TProbe2::start`], consumed by
 /// [`TProbe2::end`] or [`TProbe2::end_batch`]. Carries the
@@ -80,7 +80,7 @@ impl TProbe2 {
     /// figures.
     ///
     /// Exits the process (code 1) if the hardware tick counter
-    /// isn't usable — see [`crate::perf::ticks::require_ok`].
+    /// isn't usable — see [`crate::ticks::require_ok`].
     pub fn new(name: &str) -> Self {
         ticks::require_ok();
         let _ = ticks::ticks_per_ns();

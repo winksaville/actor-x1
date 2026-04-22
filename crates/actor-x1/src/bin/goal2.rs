@@ -13,10 +13,10 @@
 
 use std::time::Duration;
 
-use actor_x1::perf::{self, pin, ticks};
 use actor_x1::runtime::MultiThreadRuntime;
 use actor_x1::{Actor, Context, Message};
 use clap::Parser;
+use tprobe::{self as perf, pin, ticks};
 
 /// Actor that, on every message received, sends exactly one
 /// message back to its configured peer. Same as goal1's but must
