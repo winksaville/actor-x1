@@ -819,3 +819,62 @@ suffix is noise.
 - No remaining `TProbe2` or `tprobe2` (case-sensitive) in the
   `crates/` tree per a final grep — confirms the sweep is
   complete.
+
+## Workspace split complete (0.2.0)
+
+Closes the `0.2.0` ladder. The `-N` suffix drops; the repo is
+now a two-crate virtual workspace with `tprobe` extracted from
+what used to live at `crates/actor-x1/src/perf/`. No behavior
+change vs. `0.2.0-3`; this is the closing marker.
+
+- `crates/actor-x1/Cargo.toml`: `0.2.0-3` → `0.2.0`.
+- `README.md`: three updates to reflect the post-split state
+  (`cargo install --path crates/actor-x1`; sample banner
+  `0.1.0` → `0.2.0`; three `tprobe2` → `tprobe` references in
+  sample output and the "Reading the band table" section).
+- `notes/todo.md`: overall `Extract perf into tprobe workspace
+  crate` entry moves from `## In Progress` to `## Done` with a
+  new reference `[7]` pointing at this section (Stage 1's
+  entry uses the same pattern — pointing at the closing
+  section rather than the plan marker).
+- `notes/chores-01.md`: this section.
+
+### The 0.2.0 ladder at a glance
+
+| Version | Landmark |
+|---|---|
+| `0.2.0-0` | Plan marker + CLAUDE.md push-flow clarifications |
+| `0.2.0-1` | Workspace layout — `crates/actor-x1` + empty `crates/tprobe` |
+| `0.2.0-2` | Move perf from `actor-x1` into `tprobe` |
+| `0.2.0-3` | Rename `TProbe2` → `TProbe`, `tprobe2.rs` → `tprobe.rs` |
+| **`0.2.0`** | **Closing marker** |
+
+### What ships in 0.2.0
+
+- Two workspace members under `crates/`:
+  `actor-x1` (the binaries and runtimes) and `tprobe`
+  (the vendored-from-iiac-perf probe stack).
+- `tprobe` at version `0.1.1` — standalone crate providing
+  `TProbe`, `TProbeRecId`, `Overhead` / `calibrate`, and the
+  `band_table`, `fmt`, `pin`, `ticks` submodules.
+- `actor-x1` picks up `tprobe` via a path dependency; perf
+  crates (`core_affinity`, `hdrhistogram`, `minstant`) no
+  longer declared directly.
+- Session-flow conventions codified in CLAUDE.md:
+  `vc-x1 push` invocation, prerequisite `.gitignore` entry
+  for `/.vc-x1`, prerequisite `jj bookmark track` on first
+  push, `other-repo` terminology block, `## <other-repo>
+  session notes:` body tail, clarified `-N`-is-complete
+  Versioning wording.
+- 22 unit tests (5 in actor-x1's runtime module, 17 in
+  `tprobe`). Same count as `0.1.0` — the split was purely
+  structural.
+
+### What's next
+
+Stage 2 (see [design.md](design.md)): three actors with a
+richer `Message { src_id, dst_id, send_count }`, per-actor
+constructors, and names. `tprobe`'s API settled enough in
+this ladder that promoting it to a sibling repo (if ever
+wanted) would now be a straightforward copy rather than
+another extraction round.

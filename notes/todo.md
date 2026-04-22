@@ -5,8 +5,6 @@ and reference links to more details.
 
 ## In Progress
 
-- Extract perf into tprobe workspace crate [[3]]
-
 ## Todo
 
 See [Foramt details](README.md#todo-format)
@@ -24,6 +22,7 @@ and older `## Done` sections are moved to [done.md](done.md) to keep this file s
 - Workspace layout + tprobe skeleton (0.2.0-1) [[4]]
 - Move perf into tprobe crate (0.2.0-2) [[5]]
 - Rename TProbe2 → TProbe (0.2.0-3) [[6]]
+- Extract perf into tprobe workspace crate (0.2.0) [[7]]
 
 
 # References
@@ -34,3 +33,4 @@ and older `## Done` sections are moved to [done.md](done.md) to keep this file s
 [4]: chores-01.md#workspace-layout--tprobe-skeleton-020-1
 [5]: chores-01.md#move-perf-into-tprobe-crate-020-2
 [6]: chores-01.md#rename-tprobe2--tprobe-020-3
+[7]: chores-01.md#workspace-split-complete-020

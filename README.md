@@ -46,17 +46,17 @@ Stage 1 (the PoC landed at 0.1.0) provides two binaries:
 - **`goal2`** — two actors on two threads, ping-ponging over
   `std::sync::mpsc` channels.
 
-Install with `cargo install --path .`; both share a common CLI
-shape:
+Install with `cargo install --path crates/actor-x1`; both share
+a common CLI shape:
 
 ```
 $ goal1 0.5 --warmup 0 --inner 1000 --pin 0
-actor-x1 0.1.0
+actor-x1 0.2.0
 goal1: 102087000 messages in 0.500s (204.174 M msg/s, inner=1000)
   pinning: main → core 0
   apparatus: framing=21 tk (5.54 ns); per-event at inner=1000 = 0 tk (0.00 ns)
 
-  tprobe2: goal1.dispatch [count=102,087]
+  tprobe: goal1.dispatch [count=102,087]
               first     last    range        count mean
     min-p1        0 ns     0 ns     0 ns         0    0 ns
     p1-p10        0 ns     0 ns     0 ns         0    0 ns
@@ -113,14 +113,14 @@ goal2 1 --pin 0,1
 
 ## Reading the band table
 
-The `tprobe2` block is a 12-row percentile histogram with four
+The `tprobe` block is a 12-row percentile histogram with four
 summary rows. Every row renders every run, even when a band
 holds no data — a zero row is distinguishable from a missing row.
 
 ### Header
 
 ```
-tprobe2: <name> [count=N]
+tprobe: <name> [count=N]
 ```
 
 `<name>` identifies the probe (`goal1.dispatch`,
