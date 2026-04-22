@@ -291,7 +291,16 @@ impl MultiThreadRuntime {
     /// down and join every thread. Returns each actor's
     /// `(messages_handled, probe)` pair in id order. Consumes the
     /// runtime's registered factories and pending seeds.
-    pub fn run(&mut self, warmup: Duration, measurement: Duration) -> Vec<(u64, TProbe2)> {
+    ///
+    /// `pin_cores` is a list of logical CPUs to pin actor threads
+    /// to; actor `i` pins to `pin_cores[i % pin_cores.len()]`.
+    /// An empty slice leaves all actor threads unpinned.
+    pub fn run(
+        &mut self,
+        warmup: Duration,
+        measurement: Duration,
+        pin_cores: &[usize],
+    ) -> Vec<(u64, TProbe2)> {
         let factories = std::mem::take(&mut self.factories);
         let seeds = std::mem::take(&mut self.pending_seeds);
         let n = factories.len();
@@ -313,9 +322,15 @@ impl MultiThreadRuntime {
             let rx = receivers[id].take().unwrap();
             let peers: Vec<Sender<Signal>> = senders.to_vec();
             let probe_name = format!("{}.actor{}", self.probe_name_prefix, id);
+            let pin_target = if pin_cores.is_empty() {
+                None
+            } else {
+                Some(pin_cores[id % pin_cores.len()])
+            };
             let h = thread::Builder::new()
                 .name(format!("actor-{id}"))
                 .spawn(move || {
+                    crate::perf::pin::pin_current(pin_target);
                     let actor = factory();
                     actor_loop(actor, rx, peers, probe_name)
                 })
@@ -432,7 +447,7 @@ mod mt_tests {
         rt.seed(0, Message);
         // 50ms each phase — leaves plenty of slack even on
         // heavily loaded CI, while still under 0.2s total.
-        let results = rt.run(Duration::from_millis(50), Duration::from_millis(50));
+        let results = rt.run(Duration::from_millis(50), Duration::from_millis(50), &[]);
         assert_eq!(results.len(), 2);
         // Ping-pong is symmetric: both actors should have handled
         // messages during the measurement window.

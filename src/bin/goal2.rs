@@ -13,7 +13,7 @@
 
 use std::time::Duration;
 
-use actor_x1::perf::{self, ticks};
+use actor_x1::perf::{self, pin, ticks};
 use actor_x1::runtime::MultiThreadRuntime;
 use actor_x1::{Actor, Context, Message};
 use clap::Parser;
@@ -64,6 +64,15 @@ struct Cli {
     /// per-event values.
     #[arg(long)]
     raw: bool,
+
+    /// Pin each actor thread to a logical CPU. Accepts a
+    /// comma-separated / range list; actor `i` pins to
+    /// `pin[i % pin.len()]`. Examples: `--pin 0,1` pairs two
+    /// actors to two CPUs; `--pin 0` oversubscribes both onto
+    /// one core. Tightens stdev by eliminating OS thread
+    /// migration noise.
+    #[arg(long)]
+    pin: Option<String>,
 }
 
 /// `value_parser` helper: reject negative, NaN, and infinite values.
@@ -102,7 +111,17 @@ fn main() {
 
     let warmup = Duration::from_secs_f64(cli.warmup);
     let measurement = Duration::from_secs_f64(cli.duration_s);
-    let results = rt.run(warmup, measurement);
+    let pin_cores: Vec<usize> = match cli.pin.as_deref() {
+        None => vec![],
+        Some(spec) => match pin::parse_cores(spec) {
+            Ok(cores) => cores,
+            Err(e) => {
+                eprintln!("error: --pin: {e}");
+                std::process::exit(2);
+            }
+        },
+    };
+    let results = rt.run(warmup, measurement, &pin_cores);
 
     let total_count: u64 = results.iter().map(|(c, _)| *c).sum();
     let mmps = total_count as f64 / cli.duration_s / 1e6;
@@ -121,6 +140,15 @@ fn main() {
         );
     } else {
         println!("  apparatus: raw (no overhead subtraction)");
+    }
+    if pin_cores.is_empty() {
+        println!("  pinning: none (unpinned)");
+    } else {
+        let n = results.len();
+        let plan: Vec<String> = (0..n)
+            .map(|i| format!("actor{i}→core{}", pin_cores[i % pin_cores.len()]))
+            .collect();
+        println!("  pinning: {}", plan.join(", "));
     }
     println!();
 

@@ -419,3 +419,77 @@ message, (2) two cross-thread context switches per ping-pong
 round, (3) cache-line bouncing between the two actors' threads.
 An unbounded channel or a lock-free mpsc implementation would
 close some of this but the context-switch floor is fundamental.
+
+## `--pin` for thread CPU affinity (0.1.0-8)
+
+Adds `--pin <CORES>` to both binaries. Tightens the stdev of
+probe reports by eliminating OS thread-migration noise, at the
+cost of exposing placement sensitivity in goal2 (pinning to
+cross-CCX cores raises the mean because every message forces a
+cross-complex cache coherence round-trip).
+
+Adapted from `../iiac-perf/src/pin.rs` with only the two
+primitives we need (`parse_cores`, `pin_current`); the affinity
+save/restore, `--no-pin-cal`, and mask-summary helpers are
+elided — Stage 1 doesn't need them.
+
+### File-level edits
+
+- `Cargo.toml`: bump to 0.1.0-8; add `core_affinity = "0.8"`.
+- `src/perf/pin.rs`: new module. `parse_cores(&str) -> Result<Vec<usize>, String>`
+  (comma-separated / range list, duplicates preserved for
+  oversubscription) and `pin_current(Option<usize>)` (pin the
+  calling thread; no-op on `None`). 7 unit tests for the parser
+  (plain list, range, mixed, duplicates, empty string, reverse
+  range errors, garbage errors).
+- `src/perf/mod.rs`: `pub mod pin`.
+- `src/runtime.rs`: `MultiThreadRuntime::run` gains a
+  `pin_cores: &[usize]` parameter; actor `i` pins to
+  `pin_cores[i % pin_cores.len()]` inside its spawned thread
+  (before the actor factory runs or the probe is created). Empty
+  slice = unpinned (existing behavior). The lone mt_test updated
+  to pass `&[]`.
+- `src/bin/goal1.rs`: `--pin <CORES>` flag (`Option<String>`;
+  parsed via `pin::parse_cores` in `main`). Uses the first core
+  of the list (goal1 is single-threaded); extra cores silently
+  ignored. Pins the main thread before calibration and dispatch.
+  New `pinning: …` line in the output.
+- `src/bin/goal2.rs`: `--pin <CORES>` flag, same parsing. Parsed
+  list passed through to `rt.run(warmup, measurement, &pins)`.
+  `pinning: actor0→coreN, actor1→coreM, …` line in the output.
+
+### A/B on this box (3900X, 12-core / 24-thread)
+
+`goal2 0.5 --warmup 0.5` — same workload, three placements:
+
+| Pinning     | Throughput | Mean / event | Mean min-p99 | Stdev min-p99 |
+|---          |---         |---           |---           |---            |
+| unpinned    | 0.374 M/s  | 632 ns       | 622 ns       | **246 ns**    |
+| `--pin 0,1` | 0.308 M/s  | 667 ns       | 654 ns       | 171 ns        |
+| `--pin 0,4` | 0.212 M/s  | 1,496 ns     | 1,487 ns     | **80 ns**     |
+
+**Stdev tightens dramatically** with pinning: min-p99 stdev
+drops 246 → 80 ns (3×) at `--pin 0,4`. Migration noise was a
+real component of the unpinned variance.
+
+**p10–p40 rises** (user's prediction): `--pin 0,4` puts the two
+actors on different CCX complexes (each CCX = 6 cores on Zen 2),
+so every ping-pong round-trip incurs a cross-CCX cache coherence
+transfer. Mean climbs from 632 ns → 1,496 ns — the placement cost.
+`--pin 0,1` (same CCX) stays close to unpinned throughput
+(~0.31 M/s vs 0.37) but still narrows stdev somewhat.
+
+The bot thinks these numbers are the intended story: pinning
+trades a potentially higher mean for much more reproducible
+measurements, which is the right tradeoff for code-change A/B
+work. The placement itself then becomes a tunable — users pick
+cores that match what they want to measure (best-case
+same-complex, worst-case cross-socket, etc.).
+
+### `goal1 --pin`
+
+Single-thread goal1 sees little throughput change with
+`--pin 5` (~206 M msg/s, identical to unpinned) — all the work
+is on one thread anyway, and migration cost is already amortized
+over the 200 M msg/s inner loop. Value of pinning is purely
+reproducibility.

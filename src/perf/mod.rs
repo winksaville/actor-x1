@@ -26,6 +26,7 @@
 pub(crate) mod band_table;
 pub(crate) mod fmt;
 pub mod overhead;
+pub mod pin;
 pub mod ticks;
 pub mod tprobe2;
 

@@ -8,7 +8,7 @@
 
 use std::time::Duration;
 
-use actor_x1::perf::{self, ticks};
+use actor_x1::perf::{self, pin, ticks};
 use actor_x1::runtime::SingleThreadRuntime;
 use actor_x1::{Actor, Context, Message};
 use clap::Parser;
@@ -64,6 +64,13 @@ struct Cli {
     /// including its own two-rdtsc framing (~4 ns on modern x86).
     #[arg(long)]
     raw: bool,
+
+    /// Pin the workload thread to a logical CPU. Accepts a single
+    /// id or a comma-separated / range list; only the first core
+    /// is used (goal1 is single-threaded). Tightens stdev by
+    /// eliminating OS thread migration noise.
+    #[arg(long)]
+    pin: Option<String>,
 }
 
 /// `value_parser` helper: reject negative, NaN, and infinite values.
@@ -85,6 +92,20 @@ fn main() {
     let cli = Cli::parse();
 
     println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"),);
+
+    // Pin the main thread before any work — calibration and the
+    // dispatch loop both run here, so they share the pinned core.
+    let pin_core: Option<usize> = match cli.pin.as_deref() {
+        None => None,
+        Some(spec) => match pin::parse_cores(spec) {
+            Ok(cores) => cores.first().copied(),
+            Err(e) => {
+                eprintln!("error: --pin: {e}");
+                std::process::exit(2);
+            }
+        },
+    };
+    pin::pin_current(pin_core);
 
     let mut rt = SingleThreadRuntime::new("goal1.dispatch");
     let a_id = rt.add_actor(Box::new(PingPongActor { peer_id: 1 }));
@@ -112,6 +133,10 @@ fn main() {
         "goal1: {count} messages in {:.3}s ({mmps:.3} M msg/s, inner={})",
         cli.duration_s, cli.inner,
     );
+    match pin_core {
+        Some(c) => println!("  pinning: main → core {c}"),
+        None => println!("  pinning: none (unpinned)"),
+    }
     if let Some(ovh) = &overhead {
         let framing_ns = ovh.framing_ticks as f64 / ticks::ticks_per_ns();
         let per_event_tk = ovh.per_event_ticks(cli.inner);
