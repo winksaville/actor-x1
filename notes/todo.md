@@ -5,6 +5,8 @@ and reference links to more details.
 
 ## In Progress
 
+- Extract perf into tprobe workspace crate [[3]]
+
 ## Todo
 
 See [Foramt details](README.md#todo-format)
@@ -24,3 +26,4 @@ and older `## Done` sections are moved to [done.md](done.md) to keep this file s
 
 [1]: design.md
 [2]: chores-01.md#stage-1-complete-010
+[3]: chores-01.md#extract-perf-into-tprobe-crate--plan-marker-020-0

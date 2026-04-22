@@ -15,6 +15,12 @@ Both repos are managed with `jj` (Jujutsu), which coexists with git.
 - Bot session repo: `.claude`
   (symlink from `~/.claude/projects/<path-to-project-root>/.claude`)
 
+The bot session repo is this project's **`other-repo`** — the
+path is set by `[workspace].other-repo` in `.vc-config.toml`
+(default `.claude`, as used here). Concrete examples below use
+`.claude` for readability; treat the path as configurable where
+it appears in prose.
+
 ## Working Directory
 
 Prefer staying in the project root. Use `-R` flags or absolute paths
@@ -109,16 +115,26 @@ a version suffix:
 - **Title**: target ~50 chars, short summary of *what* changed.
   Include the version. Common types: `feat`, `fix`, `refactor`,
   `test`, `docs`, `chore`.
-- **App-repo body**: short intro paragraph (1–3 sentences), then a
-  terse bullet list. Each bullet corresponds one-to-one with the
-  edits structure already documented in `notes/chores-*.md` for
-  this step — just the file and a one-line gist (e.g.
-  `README.md: new Overview intro`). Do *not* restate the detail
-  that lives in chores; the commit body is a scan-able index, not
-  a duplicate. The chores section is the source of truth.
-- **Session-repo body**: terse intro + a few session-activity
-  bullets. Doesn't need to mirror chores since it describes
-  in-session work, not code changes.
+- **Body** (same across both repos): short intro paragraph (1–3
+  sentences), then a terse bullet list. Each bullet corresponds
+  one-to-one with the edits structure already documented in
+  `notes/chores-*.md` for this step — just the file and a
+  one-line gist (e.g. `README.md: new Overview intro`). Do *not*
+  restate the detail that lives in chores; the commit body is a
+  scan-able index, not a duplicate. The chores section is the
+  source of truth.
+- **Session notes** (optional tail, appended to the body): if the
+  session produced items worth preserving that don't fit the
+  code-change index — in-session tooling work, dead ends,
+  rationale — append a trailing subsection titled
+  `## <other-repo> session notes:` (e.g.
+  `## .claude session notes:`) with those items as bullets. The
+  same body (main content plus any session-notes subsection)
+  lands in both commits.
+- **Ochid trailer**: do *not* include `ochid:` in the body you
+  pass via `--body`. Push appends the correct per-repo trailer
+  at the commit stages (`ochid: /.claude/<chid>` for the app-repo
+  commit; `ochid: /<chid>` for the `.claude` commit).
 - Examples:
   - `feat: add fix-ochid subcommand (0.22.0)`
   - `fix: fix-ochid prefix bug (0.22.1)`
@@ -216,6 +232,14 @@ Before proposing a commit, run all of the following and fix any issues:
 8. Update `notes/README.md` — if functionality changed (new flags,
    new subcommands, changed behavior)
 
+Push's preflight re-runs `vc-x1 sync` + `cargo fmt` +
+`cargo clippy --all-targets -- -D warnings` + `cargo test` as a
+safety net. Run the checklist above locally anyway — fmt / clippy /
+test iteration is cheaper in-conversation than bouncing off
+preflight after review approval. Steps 4–5 (`cargo install --path .`
+and retest) are **not** in push's preflight (project-specific); the
+bot runs them.
+
 ## Code Conventions
 
 ### Doc comments on every file, function, and method
@@ -297,47 +321,111 @@ is app repo, second is `.claude`).
 
 ## Commit-Push-Finalize Flow
 
-Two-checkpoint flow with explicit user approval at each stage.
+**Prerequisite — one-time per repo:**
+
+- `.gitignore` must include `/.vc-x1` so push's in-progress
+  state files (`.vc-x1/push-state.toml`) don't get committed.
+  Push warns at preflight if the entry is missing.
+- The target bookmark must have a tracking remote
+  (`jj bookmark track <bookmark>@origin -R .`). `jj git fetch`
+  creates remote bookmarks as non-tracking by default; push
+  currently surfaces this as a raw jj error at `push-app` after
+  commits are locally made, so confirm tracking is set up
+  before the first push in a new clone.
+
+**Use `vc-x1 push <bookmark>` — it wraps the full flow in one
+command with two interactive approval gates.** Push runs
+preflight (sync + fmt + clippy + test), prompts for review,
+composes the commit message (via `--title`/`--body` or `$EDITOR`),
+prompts for message approval, then commits both repos → advances
+bookmarks → pushes app → finalizes `.claude`. Failures inside the
+local mutation window roll both repos back via `jj op restore`;
+after `push-app` succeeds the remote boundary is crossed and
+recovery is forward-only.
 
 **Run this flow after every step** — not only at session end.
 Single-step and multi-step changes are of equal importance: a
-single-step change is one flow; a multi-step change is one flow per
-`X.Y.Z-N` commit plus one for the final release commit. Each step
-gets its own commits, its own push, and its own finalize — so dev
-markers land on the remote and in the `.claude` history as they
-happen rather than being batched until the end.
+single-step change is one `push` invocation; a multi-step change
+is one `push` per `X.Y.Z-N` commit plus one for the final release
+commit. Each step gets its own commit, its own push, and its own
+finalize — so dev markers land on the remote and in `.claude` as
+they happen rather than being batched until the end.
 
-### Checkpoint 1: Commit
-
-Prepare both commit commands and **present them for approval**. Use
-the **same title** for both commits so they're easy to correlate.
-The body can differ: the app repo body should summarize code
-changes; the bot session repo body should note what was done in the
-session.
-
-On approval, execute the commits and set bookmarks:
+### Run `vc-x1 push`
 
 ```
-jj commit -m "shared title" -m "app body" -R .
-jj commit -m "shared title" -m "session body" -R .claude
-jj bookmark set <bookmark> -r @- -R .
-jj bookmark set <bookmark> -r @- -R .claude
+vc-x1 push main                                      # interactive (review + $EDITOR)
+vc-x1 push main --title "..." --body "..."           # flags skip $EDITOR
+vc-x1 push main --yes --title "..." --body "..."     # full non-interactive
+vc-x1 push main --dry-run                            # preview (no side effects)
+vc-x1 push main --from commit-app                    # resume from specific stage
+vc-x1 push --status                                  # show saved state
+vc-x1 push main --restart                            # clear saved state; start fresh
 ```
 
-### Checkpoint 2: Push and finalize
+The two approval gates are surfaced by push itself:
 
-After commits succeed, **ask the user to approve push and finalize**.
-On approval, push the app repo and finalize the bot session in a
-single operation. Say any final words (e.g. "next is ...") **before**
-executing — nothing should be output after finalize.
+1. **Review** — push prints `jj diff --stat` for both repos and
+   prompts `[y/N]`. Approve = "the work is done right".
+2. **Message** — push either uses `--title`/`--body` (non-editor
+   path) or opens `$EDITOR` on a template. Approve = "the message
+   reads right".
+
+Both titles and bodies are the **same** across the two commits;
+per-repo `ochid:` trailers are appended by push itself. See
+`## Commit Message Style` for body structure.
+
+For the full flag list and stage machine, see `vc-x1 push --help`
+and `notes/chores-05.md > Add push subcommand (0.37.0)`.
+
+### Bot communication during the flow
+
+When applying the flow on the user's behalf, use plain prose at
+each gate — no insider jargon ("Gate N signal", "Checkpoint N",
+etc.):
+
+1. **After completing the work** — summarize what changed
+   (file-by-file or feature-by-feature, terse) and end with
+   something like:
+
+   > Work complete. Please review. On approval I'll prep the
+   > commit title and body for a second approval before pushing.
+
+2. **After review approval** — present the proposed `$TITLE` and
+   `$BODY` explicitly, then ask permission to run `vc-x1 push`.
+   Do **not** spell out the full
+   `vc-x1 push <bookmark> --yes --title "$TITLE" --body "$BODY"`
+   invocation by default — it's mechanical and obvious from the
+   title/body. Show it only on explicit request (verbose mode /
+   debugging).
+
+3. **After execution approval** — run the push command. `push`
+   handles commit + bookmark + push + finalize internally;
+   nothing should be output after the push command (finalize is
+   detached and absolute-last; see "After finalize: stop and
+   wait" below).
+
+### Pre-step: `vc-x1 sync` (still useful)
+
+Push's preflight runs `vc-x1 sync --no-dry-run` as its first step
+so divergence is resolved before the build. Running sync manually
+before you *start* editing is still cheap (one line when clean)
+and surfaces remote changes earlier:
 
 ```
-jj git push --bookmark <bookmark> -R . && vc-x1 finalize --repo .claude --squash <SOURCE,TARGET> --push <bookmark> --delay 10 --detach --log /tmp/vc-x1-finalize.log
+vc-x1 sync                            # dual-repo workspace
+vc-x1 sync -R .                       # single-repo project
+vc-x1 sync --quiet                    # silent; exit code signals result
 ```
 
-Replace `<bookmark>` with the active bookmark (e.g. `main`,
-`dev-0.14.0`). Do **not** push `.claude` separately — `finalize`
-handles that push after squashing trailing writes.
+Output shape:
+
+- **Clean**: one line — `sync: N repos, all up-to-date`. Proceed.
+- **Action needed** (`behind` / `diverged`): per-repo fetch +
+  state lines, then `dry-run — re-run with --no-dry-run to apply`.
+  Inspect, then re-run with `--no-dry-run` (or resolve conflicts
+  if rebase fails).
+- **`--quiet`**: no output; exit code is the only signal.
 
 ### After finalize: stop and wait
 
@@ -362,8 +450,8 @@ this stage. Until told otherwise, treat as absolute.
 
 ### Late changes after push
 
-If changes are made to the app repo after it has been pushed (e.g.
-updating CLAUDE.md or memory), the commit is now immutable. Use
+If the app repo needs a tweak after `push-app` succeeded (e.g.
+updating CLAUDE.md or memory), the commit is immutable. Use
 `--ignore-immutable` to squash the changes in, then re-push:
 
 ```
@@ -372,21 +460,22 @@ jj bookmark set <bookmark> -r @- -R .
 jj git push --bookmark <bookmark> -R .
 ```
 
-### Finalize the .claude repo
+(`.claude` is also mutable via this pattern when needed, though
+push's `finalize-claude` stage normally handles trailing session
+writes so you rarely hit this case there.)
 
-The **very last action** in a session is to finalize the `.claude`
-repo. `--squash @,@-` squashes the working copy into the session
-commit. The delay gives a safety margin against any pending writes.
-Always use a short relative path for `--repo`.
+### Manual finalize fallback
 
-**Nothing should happen after finalize** — no memory writes, no tool
-calls, no additional output. If any work is done after finalize, run
-finalize again so the trailing writes are captured.
+If push exited before `finalize-claude` (e.g. `--no-finalize`
+was set, or a failure between `push-app` and `finalize-claude`),
+run finalize by hand:
 
 ```
 vc-x1 finalize --repo .claude --squash --push <bookmark> --delay 10 --detach --log /tmp/vc-x1-finalize.log
 ```
 
+**Nothing should happen after finalize** — no memory writes, no
+tool calls, no additional output. If any work is done after
+finalize, run finalize again so the trailing writes are captured.
 Do **not** echo or restate the finalize output — the Bash tool
-already displays it. Any trailing text output creates writes that
-miss the finalize squash window.
+already displays it.

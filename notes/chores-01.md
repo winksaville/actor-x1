@@ -544,3 +544,63 @@ Stage 2 (see [design.md](design.md)): three actors, a richer
 constructors and names. Promoting the vendored perf stack to a
 shared library crate is also on the radar once Stage 2 exposes
 what's stable.
+
+## Extract perf into tprobe crate — plan marker (0.2.0-0)
+
+Converts the single-crate repo into a Cargo workspace with
+`actor-x1` and a new `tprobe` crate carved out of `src/perf/`.
+The 0.1.0-2 chores note flagged "promoting this to a shared
+crate is worthwhile once Stage 2 is underway" — Stage 1 has
+shipped and divergence from upstream `iiac-perf` has settled,
+so this is the natural next step before Stage 2 adds new
+actors and messages.
+
+Multi-step ladder:
+
+- `0.2.0-0` — Plan marker. Bump root `Cargo.toml` to `0.2.0-0`;
+  this chore section; `notes/todo.md` entry under `## In Progress`.
+  No structural change.
+- `0.2.0-1` — Workspace layout. Move root `Cargo.toml` + `src/`
+  into `crates/actor-x1/`. Root `Cargo.toml` becomes a virtual
+  workspace (`[workspace]` only, `resolver = "2"`,
+  `members = ["crates/actor-x1", "crates/tprobe"]`). Create
+  `crates/tprobe/` skeleton (`Cargo.toml` + `src/lib.rs`
+  docstring stub). `src/perf/*` still lives inside `actor-x1`;
+  no probe file moves yet. `cargo test` passes; both binaries
+  behave identically.
+- `0.2.0-2` — Move perf into tprobe. Move
+  `crates/actor-x1/src/perf/*` → `crates/tprobe/src/*`;
+  rewrite internal imports (`crate::perf::x` → `crate::x`).
+  Migrate `hdrhistogram`, `minstant`, `core_affinity` deps
+  from actor-x1 to tprobe's `Cargo.toml`. Add
+  `tprobe = { path = "../tprobe" }` to actor-x1's deps. Drop
+  `pub mod perf;` from actor-x1's `src/lib.rs`. Rewire call
+  sites in `runtime.rs`, `goal1.rs`, `goal2.rs`
+  (`crate::perf::x` → `tprobe::x`). Behavior unchanged; all
+  tests pass.
+- `0.2.0-3` — Rename `TProbe2` → `TProbe` and
+  `tprobe2.rs` → `tprobe.rs`. Pure sweep across the new crate
+  and its callers. The "2" only communicated "second version
+  of the probe" inside `iiac-perf`; outside that repo it's
+  noise. Upstream divergence is already substantial, so the
+  rename does not meaningfully raise any future re-sync cost.
+- `0.2.0` — Done marker. Drop `-N` suffix. `notes/todo.md`:
+  move this task to `## Done`. `notes/chores-01.md`: this
+  section. `README.md`: update any source-tree or contributor
+  notes that reference `src/perf/`.
+
+### Design decisions recorded here
+
+- **Virtual workspace, `crates/` subdir** (option (b) in the
+  plan discussion): root is `[workspace]`-only, both packages
+  live under `crates/`. Cleaner symmetric layout than mixing
+  `[package]` and `[workspace]` at the root, at the cost of a
+  one-time move of every actor-x1 source file.
+- **Crate name `tprobe` drops the "2"**. The type rename is
+  deferred to its own step (`0.2.0-3`) to keep the move diff
+  (`0.2.0-2`) separate from the rename diff — easier review
+  for each.
+- **Perf deps move with the perf code.** `hdrhistogram`,
+  `minstant`, and `core_affinity` migrate out of actor-x1's
+  `Cargo.toml` in `0.2.0-2`; actor-x1 picks them up transitively
+  via `tprobe` without redeclaring.
