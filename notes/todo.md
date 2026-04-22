@@ -5,8 +5,6 @@ and reference links to more details.
 
 ## In Progress
 
-- Stage 1 runtime PoC [[2]]
-
 ## Todo
 
 See [Foramt details](README.md#todo-format)
@@ -19,8 +17,10 @@ See [Foramt details](README.md#todo-format)
 Completed tasks are moved from `## Todo` to here, `## Done`, as they are completed
 and older `## Done` sections are moved to [done.md](done.md) to keep this file small.
 
+- Stage 1 runtime PoC [[2]]
+
 
 # References
 
 [1]: design.md
-[2]: chores-01.md#stage-1-runtime--plan-marker-010-0
+[2]: chores-01.md#stage-1-complete-010

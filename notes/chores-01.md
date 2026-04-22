@@ -493,3 +493,54 @@ Single-thread goal1 sees little throughput change with
 is on one thread anyway, and migration cost is already amortized
 over the 200 M msg/s inner loop. Value of pinning is purely
 reproducibility.
+
+## Stage 1 complete (0.1.0)
+
+Final release of the Stage 1 PoC. Drops the `-N` pre-release
+suffix and marks the design.md "Stage 1 runtime" goal as shipped.
+No behavior changes vs 0.1.0-8; this is the "done" marker.
+
+- `Cargo.toml`: `0.1.0-8` → `0.1.0`.
+- `notes/todo.md`: "Stage 1 runtime PoC" moved from
+  `## In Progress` to `## Done`; reference `[2]` updated to point
+  at this chores section.
+- `README.md`: new `## Usage`, `## Reading the band table`, and
+  `## The bot's understanding` sections inserted after
+  `## Cloning` and before `## jj Tips for Git Users`. Existing
+  dual-repo / jj / cross-repo-linking / contributing / license
+  sections unchanged.
+- `notes/chores-01.md`: this section.
+
+### The Stage 1 ladder at a glance
+
+| Version | Landmark |
+|---|---|
+| 0.1.0-0 | Cargo bootstrap + plan marker |
+| 0.1.0-1 | Goal1: single-thread ping-pong runtime |
+| 0.1.0-3 | `tprobe2` vendored from iiac-perf + inner batching + warmup + clap (folded in 0.1.0-2 retroactively) |
+| 0.1.0-4 | Always render all 12 band rows |
+| 0.1.0-5 | CLI polish: `max_term_width = 80`, version banner |
+| 0.1.0-6 | Apparatus-overhead calibration (two-point fit) |
+| 0.1.0-7 | Goal2: per-actor threads + `std::sync::mpsc` |
+| 0.1.0-8 | `--pin` for thread CPU affinity |
+| **0.1.0** | **Release marker** |
+
+### What ships in 0.1.0
+
+- Two runtimes: `SingleThreadRuntime` (Goal1) and
+  `MultiThreadRuntime` (Goal2).
+- Minimal `Actor` / `Context` / `Message` surface in `src/lib.rs`.
+- Vendored perf probe stack under `src/perf/` (`tprobe2`,
+  `band_table`, `ticks`, `fmt`, `overhead`, `pin`), diverged
+  from `../iiac-perf/src` per actor-x1 conventions but otherwise
+  tracking upstream.
+- Two binaries: `goal1` and `goal2`, sharing a common CLI shape.
+- 22 unit tests; no integration tests yet.
+
+### What's next
+
+Stage 2 (see [design.md](design.md)): three actors, a richer
+`Message` with `src_id` / `dst_id` / `send_count`, per-actor
+constructors and names. Promoting the vendored perf stack to a
+shared library crate is also on the radar once Stage 2 exposes
+what's stable.
