@@ -277,3 +277,71 @@ vars).
   `before_help = concat!(env!("CARGO_PKG_NAME"), " ", env!("CARGO_PKG_VERSION"))`;
   `println!` the same banner at the top of `main` for
   non-help runs.
+
+## Apparatus overhead calibration (0.1.0-6)
+
+Adds a calibration phase between warmup and measurement that fits
+the probe's framing cost (the bias on every stored
+`end_tsc − start_tsc` delta) and subtracts the appropriate per-
+event correction at report time. `--raw` opts out.
+
+### Why two-point (not single-point)
+
+`rdtsc` isn't a serializing instruction, so two back-to-back reads
+with nothing between can execute out-of-order and measure ~0 ticks
+— below the true apparatus cost. `_mm_lfence` bracketing drains
+the pipeline harder than real work does (measured 38 tk on this
+box, 2× the real bias). The two-point fit gives the right answer
+by varying `inner` on an empty bench and solving
+`raw_delta = framing + inner · loop_per_iter` in `f64` (no
+integer-division loss at small values).
+
+On this box the fit lands on **framing = 21 tk (~5.5 ns)**,
+reproducible across runs. With the correction applied,
+`inner=1` probe mean drops from 9 ns (raw) to 4 ns, which matches
+the `inner=1000` raw mean of 5 ns (where the correction is
+negligible) — both phases converge on the same actual
+`handle_message` cost.
+
+### File-level edits
+
+- `Cargo.toml`: bump to 0.1.0-6.
+- `src/perf/overhead.rs`: new module. Constants `CAL_WARMUP = 10_000`,
+  `CAL_SAMPLES = 1_000`, `N_LOW = 100`, `N_HIGH = 10_000`. `Overhead`
+  struct carries `framing_ticks`, `loop_per_iter_ticks`,
+  `cal_raw_low_ticks`, `cal_raw_high_ticks`, `cal_duration`.
+  `calibrate()` runs the fit; `Overhead::per_event_ticks(batch)`
+  returns `framing_ticks / batch.max(1)` for subtraction. Two unit
+  tests (amortization math + calibration smoke).
+- `src/perf/mod.rs`: `pub mod overhead` + re-export
+  `Overhead`/`calibrate`.
+- `src/perf/tprobe2.rs`: `TProbe2::report` signature gains
+  `overhead: Option<&Overhead>`; drain loop subtracts
+  `ovh.per_event_ticks(batch)` from each `per_event_raw` before
+  histogram insertion (via `saturating_sub`, clamp at 1). New
+  test `report_subtracts_overhead`. Old tests updated to pass `None`.
+- `src/bin/goal1.rs`: new `--raw` flag; calibrates on the warmed
+  system between `probe.clear()` and the measurement `run_for`;
+  prints an `apparatus: …` diagnostic line before the band-table
+  report.
+
+### What's *not* subtracted
+
+Only `framing_ticks`. `loop_per_iter_ticks` (from the black_box
+empty bench) is kept on `Overhead` for diagnostic visibility but
+deliberately not subtracted — the real dispatch loop's per-iter
+cost (queue pop, deadline check, SingleCtx construction, dynamic
+dispatch) is part of what the user wants to measure, and
+`black_box(1)`'s loop_per_iter doesn't model it anyway. User
+already signed off on this scope.
+
+### Smoke
+
+- `goal1 0.5 --warmup 0 --inner 1` — 19.9 M msg/s, apparatus
+  21 tk / 5.54 ns, probe mean min-p99 **4 ns** (from 9 ns raw).
+- `goal1 0.5 --warmup 0 --inner 1000` — 204 M msg/s, apparatus
+  correction 0 tk (rounds down), probe mean min-p99 5 ns
+  (unchanged — raw already clean at this batch).
+- `goal1 0.5 --warmup 0 --inner 1 --raw` — apparatus: "raw (no
+  overhead subtraction)"; no calibration run.
+- 14/14 tests pass. Calibration adds ~10 ms to default runs.

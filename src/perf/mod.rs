@@ -25,7 +25,9 @@
 
 pub(crate) mod band_table;
 pub(crate) mod fmt;
+pub mod overhead;
 pub mod ticks;
 pub mod tprobe2;
 
+pub use overhead::{Overhead, calibrate};
 pub use tprobe2::{TProbe2, TProbe2RecId};

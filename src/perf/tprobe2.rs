@@ -25,10 +25,14 @@
 //!   histogram stores per-event cost.
 //! - [`TProbe2::clear`] added — resets records and histogram,
 //!   used at the warmup→measurement boundary.
+//! - [`TProbe2::report`] now takes an optional [`Overhead`]
+//!   and subtracts the per-event framing correction from each
+//!   stored value at drain time.
 
 use hdrhistogram::Histogram;
 
 use crate::perf::band_table;
+use crate::perf::overhead::Overhead;
 use crate::perf::ticks;
 
 /// Opaque handle returned by [`TProbe2::start`], consumed by
@@ -143,17 +147,24 @@ impl TProbe2 {
     /// Render a band-table report for this probe. `as_ticks`
     /// controls the display unit: `false` converts stored tick
     /// deltas to nanoseconds (default for the CLI); `true` shows
-    /// raw ticks (`-t`/`--ticks`).
+    /// raw ticks (`-t`/`--ticks`). `overhead` (if `Some`)
+    /// subtracts per-event framing correction from each drained
+    /// record.
     ///
     /// Drains any pending `start` / `end*` records into the
-    /// histogram before rendering: `delta = (end_tsc − start_tsc)
-    /// / batch`, clamped to `1` since the histogram lower bound
-    /// is 1.
-    pub fn report(&mut self, as_ticks: bool) {
+    /// histogram before rendering:
+    /// `per_event = (end_tsc − start_tsc) / batch - overhead_correction`,
+    /// clamped to `1` since the histogram lower bound is 1.
+    pub fn report(&mut self, as_ticks: bool, overhead: Option<&Overhead>) {
         for r in self.records.drain(..) {
             let delta = r.end_tsc.saturating_sub(r.start_tsc);
             let batch = r.batch.max(1);
-            let per_event = (delta + batch / 2) / batch;
+            let per_event_raw = (delta + batch / 2) / batch;
+            let per_event = if let Some(ovh) = overhead {
+                per_event_raw.saturating_sub(ovh.per_event_ticks(batch))
+            } else {
+                per_event_raw
+            };
             self.hist.record(per_event.max(1)).unwrap(); // OK: histogram bounds are [1, 1e12]; per_event.max(1) ≥ 1, and per-event tick deltas stay well under 1e12
         }
         band_table::render("tprobe2", &self.name, &self.hist, as_ticks);
@@ -219,11 +230,35 @@ mod tests {
             end_tsc: 1000,
             batch: 10,
         });
-        p.report(true);
+        p.report(true, None);
         assert_eq!(p.hist.len(), 1);
         let v = p.hist.iter_recorded().next().unwrap().value_iterated_to();
         // (1000 + 5) / 10 = 100.
         assert_eq!(v, 100);
+    }
+
+    #[test]
+    fn report_subtracts_overhead() {
+        use std::time::Duration;
+        let mut p = TProbe2::new("t");
+        p.records.push(Record {
+            site_id: 0,
+            start_tsc: 0,
+            end_tsc: 1000,
+            batch: 10,
+        });
+        let ovh = Overhead {
+            framing_ticks: 100,
+            loop_per_iter_ticks: 0.0,
+            cal_raw_low_ticks: 0,
+            cal_raw_high_ticks: 0,
+            cal_duration: Duration::from_millis(0),
+        };
+        p.report(true, Some(&ovh));
+        let v = p.hist.iter_recorded().next().unwrap().value_iterated_to();
+        // per_event_raw = (1000 + 5) / 10 = 100. Correction = 100/10 = 10.
+        // Adjusted = 100 - 10 = 90.
+        assert_eq!(v, 90);
     }
 
     #[test]
@@ -236,12 +271,12 @@ mod tests {
         assert_eq!(p.hist.len(), 0);
         assert_eq!(p.records.len(), 2);
 
-        p.report(false);
+        p.report(false, None);
         assert_eq!(p.records.len(), 0);
         assert_eq!(p.hist.len(), 2);
 
         // Idempotent: a second report drains nothing, hist unchanged.
-        p.report(false);
+        p.report(false, None);
         assert_eq!(p.hist.len(), 2);
     }
 
@@ -250,7 +285,7 @@ mod tests {
         let mut p = TProbe2::new("t");
         let id = p.start(1);
         p.end(id);
-        p.report(false); // moves record into hist
+        p.report(false, None); // moves record into hist
         assert_eq!(p.hist.len(), 1);
         p.clear();
         assert_eq!(p.records.len(), 0);

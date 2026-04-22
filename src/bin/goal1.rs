@@ -8,6 +8,7 @@
 
 use std::time::Duration;
 
+use actor_x1::perf::{self, ticks};
 use actor_x1::runtime::SingleThreadRuntime;
 use actor_x1::{Actor, Context, Message};
 use clap::Parser;
@@ -57,6 +58,12 @@ struct Cli {
     /// Display probe values as raw ticks instead of nanoseconds.
     #[arg(short = 't', long)]
     ticks: bool,
+
+    /// Skip apparatus-overhead calibration and report uncorrected
+    /// per-event values. Use to see the raw cost the probe sees,
+    /// including its own two-rdtsc framing (~4 ns on modern x86).
+    #[arg(long)]
+    raw: bool,
 }
 
 /// `value_parser` helper: reject negative, NaN, and infinite values.
@@ -89,6 +96,15 @@ fn main() {
     rt.run_for(Duration::from_secs_f64(cli.warmup), cli.inner);
     rt.probe_mut().clear();
 
+    // Calibration (skipped with --raw). Runs on the warmed system,
+    // before measurement begins, so freq/cache state matches what
+    // the probe will see during measurement.
+    let overhead = if cli.raw {
+        None
+    } else {
+        Some(perf::calibrate())
+    };
+
     // Measurement.
     let count = rt.run_for(Duration::from_secs_f64(cli.duration_s), cli.inner);
     let mmps = count as f64 / cli.duration_s / 1e6;
@@ -96,5 +112,16 @@ fn main() {
         "goal1: {count} messages in {:.3}s ({mmps:.3} M msg/s, inner={})",
         cli.duration_s, cli.inner,
     );
-    rt.probe_mut().report(cli.ticks);
+    if let Some(ovh) = &overhead {
+        let framing_ns = ovh.framing_ticks as f64 / ticks::ticks_per_ns();
+        let per_event_tk = ovh.per_event_ticks(cli.inner);
+        let per_event_ns = per_event_tk as f64 / ticks::ticks_per_ns();
+        println!(
+            "  apparatus: framing={} tk ({:.2} ns); per-event at inner={} = {} tk ({:.2} ns)",
+            ovh.framing_ticks, framing_ns, cli.inner, per_event_tk, per_event_ns,
+        );
+    } else {
+        println!("  apparatus: raw (no overhead subtraction)");
+    }
+    rt.probe_mut().report(cli.ticks, overhead.as_ref());
 }
