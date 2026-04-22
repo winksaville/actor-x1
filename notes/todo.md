@@ -20,6 +20,8 @@ Completed tasks are moved from `## Todo` to here, `## Done`, as they are complet
 and older `## Done` sections are moved to [done.md](done.md) to keep this file small.
 
 - Stage 1 runtime PoC [[2]]
+- Extract perf into tprobe crate — plan marker (0.2.0-0) [[3]]
+- Workspace layout + tprobe skeleton (0.2.0-1) [[4]]
 
 
 # References
@@ -27,3 +29,4 @@ and older `## Done` sections are moved to [done.md](done.md) to keep this file s
 [1]: design.md
 [2]: chores-01.md#stage-1-complete-010
 [3]: chores-01.md#extract-perf-into-tprobe-crate--plan-marker-020-0
+[4]: chores-01.md#workspace-layout--tprobe-skeleton-020-1

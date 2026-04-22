@@ -1,0 +1,8 @@
+[package]
+name = "tprobe"
+version = "0.1.0-0"
+edition = "2024"
+description = "Tick-counting performance probe for short code-path measurement (skeleton; populated at actor-x1 0.2.0-2)."
+license = "MIT OR Apache-2.0"
+
+[dependencies]

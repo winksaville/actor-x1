@@ -179,9 +179,10 @@ on scope:
 
 - **Single-step** (recommended for mechanical/focused changes): bump
   directly to `X.Y.Z`, implement in one commit. Simpler history.
-- **Multi-step** (for exploratory/large changes): bump to `X.Y.Z-0`,
-  implement across multiple commits incrementing the numeric
-  suffix. The final commit drops the suffix.
+- **Multi-step** (for scope that splits naturally into
+  independently-reviewable steps): bump to `X.Y.Z-0`, implement
+  across multiple `X.Y.Z-N` commits incrementing the numeric
+  suffix. The final commit drops the suffix to close the ladder.
 
 The plan should recommend one approach and get user approval before
 starting.
@@ -191,22 +192,25 @@ For multi-step:
 1. Bump version to `X.Y.Z-0` with the plan and commit as a chore
    marker.
 2. Implement in one or more `X.Y.Z-N` commits (increment N as
-   needed).
-3. Final commit bumps to `X.Y.Z` (no suffix), updates
-   `notes/todo.md` and `notes/chores-*.md` — this is the "done"
-   marker.
+   needed). Every `X.Y.Z-N` commit is a complete checkpoint in
+   its own right — the `-N` suffix only signals that more steps
+   in the same ladder are coming, not that the commit is partial
+   or exploratory. Run the full pre-commit checklist (including
+   `notes/todo.md` and `notes/chores-*.md` updates) on every
+   `-N` commit exactly as you would on a single-step release.
+3. Final commit bumps to `X.Y.Z` (no suffix) to close the ladder.
 
 **Why numeric suffixes (`-0`, `-1`, …) rather than `-devN`:**
 semver pre-release identifiers may consist of a single numeric
 component, and they compare numerically per spec. So
-`X.Y.Z-1 < X.Y.Z-2 < … < X.Y.Z` correctly orders the dev ladder
-below the done marker. Cargo accepts this form. The `-dev` prefix
-adds no information the git log doesn't already convey and
-doubles typing per commit.
+`X.Y.Z-1 < X.Y.Z-2 < … < X.Y.Z` correctly orders the ladder:
+each `-N` sorts before its final unsuffixed sibling. Cargo
+accepts this form. The `-dev` prefix adds no information the
+git log doesn't already convey and doubles typing per commit.
 
-The final release commit (no suffix) signals completion rather than
-amending prior commits. This keeps history readable and makes it easy
-to see which commits were exploratory vs final.
+The final release commit (no suffix) closes the ladder rather
+than amending prior commits. This keeps history readable: a
+chain of complete checkpoints ending in an `X.Y.Z` marker.
 
 ### Chores section headers
 

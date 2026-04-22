@@ -1,12 +1,3 @@
-[package]
-name = "actor-x1"
-version = "0.2.0-0"
-edition = "2024"
-description = "An experiment in the actor model in Rust (Communicating Sequential Processes, Hoare 1978)."
-license = "MIT OR Apache-2.0"
-
-[dependencies]
-clap = { version = "4", features = ["derive", "wrap_help"] }
-core_affinity = "0.8"
-hdrhistogram = "7"
-minstant = "0.1"
+[workspace]
+resolver = "2"
+members = ["crates/actor-x1", "crates/tprobe"]

@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "actor-x1"
-version = "0.2.0-0"
+version = "0.2.0-1"
 dependencies = [
  "clap",
  "core_affinity",
@@ -423,6 +423,10 @@ dependencies = [
  "rustix",
  "windows-sys",
 ]
+
+[[package]]
+name = "tprobe"
+version = "0.1.0-0"
 
 [[package]]
 name = "unicode-ident"

@@ -604,3 +604,55 @@ Multi-step ladder:
   `minstant`, and `core_affinity` migrate out of actor-x1's
   `Cargo.toml` in `0.2.0-2`; actor-x1 picks them up transitively
   via `tprobe` without redeclaring.
+
+## Workspace layout + tprobe skeleton (0.2.0-1)
+
+Converts the repo from a single crate at the root into a virtual
+Cargo workspace with `actor-x1` and a new `tprobe` crate under
+`crates/`. No probe code moves yet — `src/perf/*` still lives
+inside `actor-x1`, and the binaries / tests are unchanged
+behaviorally. This step only reshuffles the file layout so that
+`0.2.0-2` can move perf into `tprobe` cleanly.
+
+- `Cargo.toml` (new, root): virtual workspace.
+  `[workspace]` with `resolver = "2"`,
+  `members = ["crates/actor-x1", "crates/tprobe"]`. No
+  `[package]` at the root anymore.
+- `crates/actor-x1/Cargo.toml`: former root `Cargo.toml`, moved
+  verbatim; version bumped `0.2.0-0` → `0.2.0-1`. Deps
+  unchanged (`clap`, `core_affinity`, `hdrhistogram`,
+  `minstant`) — they migrate to `tprobe` in `0.2.0-2`.
+- `crates/actor-x1/src/`: former root `src/` moved verbatim.
+  `lib.rs`, `runtime.rs`, `bin/{goal1,goal2}.rs`, and
+  `perf/**` all in place; no content edits.
+- `crates/tprobe/Cargo.toml`: new. `name = "tprobe"`,
+  `version = "0.1.0-0"` (dev-ladder suffix matching the
+  `actor-x1` convention — drops `-N` when perf moves in at
+  `0.2.0-2`), same license, empty `[dependencies]`.
+- `crates/tprobe/src/lib.rs`: new. `//!` docstring only;
+  no public items yet.
+
+### Side effects
+
+- `Cargo.lock` stays at root (workspace-shared); cargo
+  regenerated it to recognize the two members. Version lines
+  updated automatically.
+- `cargo install --path crates/actor-x1` is the new invocation
+  for the `goal1` / `goal2` bins (root is virtual so `--path .`
+  no longer works for install).
+- `target/` stays at the root (workspace-shared); `.gitignore`
+  already excludes it, no change needed.
+- `notes/`, `README.md`, `LICENSE-*`, `CLAUDE.md`,
+  `.vc-config.toml`, `.gitignore` remain at the workspace root.
+
+### Verification
+
+- `cargo fmt --check` clean.
+- `cargo clippy --all-targets -- -D warnings` clean across both
+  members.
+- `cargo test` — 22 pass (actor-x1) + 0 (tprobe stub) = 22/22;
+  same count as `0.2.0-0`, confirming no test was lost in the
+  move.
+- `cargo install --path crates/actor-x1` replaces the prior
+  `actor-x1 v0.2.0-0` install; `goal1 --version` and
+  `goal2 --version` both report `actor-x1 0.2.0-1`.
