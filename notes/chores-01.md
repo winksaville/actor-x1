@@ -345,3 +345,77 @@ already signed off on this scope.
 - `goal1 0.5 --warmup 0 --inner 1 --raw` — apparatus: "raw (no
   overhead subtraction)"; no calibration run.
 - 14/14 tests pass. Calibration adds ~10 ms to default runs.
+
+## Goal2: per-actor threads + mpsc channels (0.1.0-7)
+
+Implements Goal2 of Stage 1: two actors running on their own
+threads, ping-ponging an empty [`Message`] over `std::sync::mpsc`
+channels, with the same warmup/measurement/calibration lifecycle
+as goal1.
+
+### Design decisions
+
+- **Factory closures instead of pre-boxed actors.** `add_actor`
+  takes `FnOnce() -> A` where `A: Actor + Send + 'static`; the
+  factory runs inside the actor's own thread. Keeps the [`Actor`]
+  trait free of a `Send` bound and matches how real actor systems
+  typically spawn state.
+- **In-band shutdown via internal `Signal` enum.** Channel payload
+  is `Signal { User(Message), ClearProbe, Shutdown }`, not
+  `Message` directly. Main thread injects `ClearProbe` at the
+  warmup → measurement boundary and `Shutdown` after measurement;
+  actors match on the variant in their `recv()` loop. Avoids an
+  out-of-band atomic flag and the associated polling.
+- **`inner` fixed at 1.** Ping-pong keeps at most one message in
+  flight per channel, so batched probe scopes (`inner > 1`) could
+  never fill — every scope would hit the partial-batch drop path.
+  The `--inner` flag from goal1 is not exposed; the hardcoded
+  `inner=1` is reflected in the throughput line.
+- **Per-actor probes, merged reporting.** Each actor thread owns
+  a [`TProbe2`] named `"goal2.dispatch.actor{id}"`. Main collects
+  `(count, probe)` on join and prints a per-actor band table (not
+  merged — two independent distributions are more informative
+  than one blended histogram in a ping-pong workload where the
+  actors should be near-identical).
+- **Calibration pre-spawn on main thread.** Matches goal1's
+  calibration code path. Same CPU → same `Overhead` applies to
+  all actor threads. Could be refined later to calibrate
+  per-thread, but unnecessary for Stage 1.
+
+### File-level edits
+
+- `Cargo.toml`: bump to 0.1.0-7.
+- `src/runtime.rs`: add `MultiThreadRuntime`, `Signal` enum,
+  `ActorFactory` alias, `MultiCtx`, and `actor_loop` helper below
+  the existing single-thread code. New `#[cfg(test)] mod mt_tests`
+  with a ping-pong smoke test (50 ms warmup + 50 ms measurement).
+- `src/bin/goal2.rs`: new binary mirroring goal1's CLI shape
+  (version banner, help width cap, --warmup, -t/--ticks, --raw),
+  no --inner. Constructs `MultiThreadRuntime`, adds two
+  `PingPongActor` factories, seeds one message, calls
+  `rt.run(warmup, measurement)`, prints summary + apparatus +
+  per-actor reports.
+
+### Smoke (release, `--warmup 0`)
+
+- `goal2 0.5` — 116,495 messages in 0.5 s (~0.23 M msg/s).
+  Mean per-dispatch ~1.17 µs; median ~1.34 µs; p99 tail to
+  ~22 µs (mostly scheduling jitter). Actors near-symmetric
+  (58,247 vs 58,248 messages).
+- `goal2 -h` — wraps at 80 cols, shows the `actor-x1 0.1.0-7`
+  banner, no `--inner` flag.
+- `goal2 0.2 --raw` — apparatus: `raw (no overhead subtraction)`;
+  calibration skipped.
+- goal1 unchanged: still ~200 M msg/s at `--inner 1000`.
+- Tests: 15/15 pass (adds `multi_thread_runs_measures_and_shuts_down_cleanly`).
+
+### The ~250× single-thread gap
+
+Goal1 at `inner=1000` hits ~205 M msg/s (~5 ns/dispatch);
+goal2 at `inner=1` hits ~0.23 M msg/s (~4 µs/round-trip, ~1.2 µs
+per-event inside the probe scope). The bot thinks the gap is
+dominated by: (1) mpsc's `Mutex` + condvar wake for every
+message, (2) two cross-thread context switches per ping-pong
+round, (3) cache-line bouncing between the two actors' threads.
+An unbounded channel or a lock-free mpsc implementation would
+close some of this but the context-switch floor is fundamental.

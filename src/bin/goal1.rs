@@ -123,5 +123,6 @@ fn main() {
     } else {
         println!("  apparatus: raw (no overhead subtraction)");
     }
+    println!();
     rt.probe_mut().report(cli.ticks, overhead.as_ref());
 }
