@@ -9,13 +9,13 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use crate::{Actor, Context, Message};
-use tprobe::TProbe2;
+use tprobe::TProbe;
 
 /// Single-threaded runtime: all actors run on the calling thread,
 /// sharing one FIFO message queue. Dispatch loops until either the
 /// caller-supplied deadline expires or the queue drains.
 ///
-/// Dispatch is wrapped in a [`TProbe2`] batched scope covering
+/// Dispatch is wrapped in a [`TProbe`] batched scope covering
 /// `inner` consecutive `handle_message` calls; per-event latency
 /// is available via [`Self::probe_mut`] after [`Self::run_for`]
 /// returns. The scope's `site_id` is the first `dst_id` in the
@@ -23,7 +23,7 @@ use tprobe::TProbe2;
 pub struct SingleThreadRuntime {
     actors: Vec<Box<dyn Actor>>,
     queue: VecDeque<(u32, Message)>,
-    probe: TProbe2,
+    probe: TProbe,
 }
 
 impl SingleThreadRuntime {
@@ -34,7 +34,7 @@ impl SingleThreadRuntime {
         Self {
             actors: Vec::new(),
             queue: VecDeque::new(),
-            probe: TProbe2::new(probe_name),
+            probe: TProbe::new(probe_name),
         }
     }
 
@@ -98,10 +98,10 @@ impl SingleThreadRuntime {
     }
 
     /// Mutable access to the embedded probe — used by callers to
-    /// invoke [`TProbe2::clear`] at the warmup → measurement
-    /// boundary and [`TProbe2::report`] after [`Self::run_for`]
+    /// invoke [`TProbe::clear`] at the warmup → measurement
+    /// boundary and [`TProbe::report`] after [`Self::run_for`]
     /// returns.
-    pub fn probe_mut(&mut self) -> &mut TProbe2 {
+    pub fn probe_mut(&mut self) -> &mut TProbe {
         &mut self.probe
     }
 }
@@ -212,7 +212,7 @@ mod tests {
 
 /// Multi-threaded runtime: one thread per actor, messages flow
 /// over per-actor [`std::sync::mpsc`] channels. Each actor thread
-/// owns a [`TProbe2`] recording per-`handle_message` latency at
+/// owns a [`TProbe`] recording per-`handle_message` latency at
 /// `inner=1`; probes are returned to the caller when threads join.
 ///
 /// Unlike [`SingleThreadRuntime`], actors are registered as
@@ -300,7 +300,7 @@ impl MultiThreadRuntime {
         warmup: Duration,
         measurement: Duration,
         pin_cores: &[usize],
-    ) -> Vec<(u64, TProbe2)> {
+    ) -> Vec<(u64, TProbe)> {
         let factories = std::mem::take(&mut self.factories);
         let seeds = std::mem::take(&mut self.pending_seeds);
         let n = factories.len();
@@ -315,7 +315,7 @@ impl MultiThreadRuntime {
         }
 
         // Spawn one thread per actor.
-        let mut handles: Vec<JoinHandle<(u64, TProbe2)>> = Vec::with_capacity(n);
+        let mut handles: Vec<JoinHandle<(u64, TProbe)>> = Vec::with_capacity(n);
         for (id, factory) in factories.into_iter().enumerate() {
             #[allow(clippy::unwrap_used)]
             // OK: receivers[id] was Some(...) since we pushed one per actor above.
@@ -390,7 +390,7 @@ impl Context for MultiCtx<'_> {
     }
 }
 
-/// Actor thread's main loop. Creates a [`TProbe2`] named
+/// Actor thread's main loop. Creates a [`TProbe`] named
 /// `probe_name`, blocks on `rx.recv()`, and for each
 /// `Signal::User` message probes a scope, dispatches
 /// `handle_message`, and increments the count.
@@ -402,8 +402,8 @@ fn actor_loop(
     rx: Receiver<Signal>,
     peers: Vec<Sender<Signal>>,
     probe_name: String,
-) -> (u64, TProbe2) {
-    let mut probe = TProbe2::new(&probe_name);
+) -> (u64, TProbe) {
+    let mut probe = TProbe::new(&probe_name);
     let mut count: u64 = 0;
     loop {
         match rx.recv() {

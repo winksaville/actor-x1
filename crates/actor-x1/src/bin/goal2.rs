@@ -2,7 +2,7 @@
 //! an empty [`Message`] over `std::sync::mpsc` channels for a
 //! caller-supplied duration in seconds, after an optional warmup.
 //! Prints messages-handled / throughput, an apparatus-overhead
-//! diagnostic, and a `tprobe2` band-table report per actor.
+//! diagnostic, and a `tprobe` band-table report per actor.
 //!
 //! Unlike goal1, `inner` is fixed at 1: ping-pong keeps at most
 //! one message in flight per channel, so batched probe scopes
@@ -89,7 +89,7 @@ fn parse_non_negative_secs(s: &str) -> Result<f64, String> {
 
 /// Parse CLI, calibrate apparatus (unless --raw), run two
 /// ping-pong actors on their own threads, print summary and
-/// per-actor `tprobe2` band-table reports.
+/// per-actor `tprobe` band-table reports.
 fn main() {
     let cli = Cli::parse();
     println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"),);

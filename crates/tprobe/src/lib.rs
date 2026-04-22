@@ -7,7 +7,7 @@
 //! `actor-x1`'s in-tree `src/perf/` module at `actor-x1 0.2.0-2`.
 //!
 //! Files:
-//! - [`tprobe2`] — scope-based probe (`start` / `end` → record buffer
+//! - [`tprobe`] — scope-based probe (`start` / `end` → record buffer
 //!   → histogram at `report` time).
 //! - [`band_table`] — shared percentile-band renderer.
 //! - [`ticks`] — hardware tick counter (x86_64 `rdtsc`).
@@ -15,7 +15,7 @@
 //!   `iiac-perf/src/harness.rs` so we don't carry the whole 393-line
 //!   benchmark harness for two helpers.
 //! - [`overhead`] — two-point apparatus-overhead calibration for
-//!   [`TProbe2`].
+//!   [`TProbe`].
 //! - [`pin`] — CPU-affinity helpers (thread pinning).
 //!
 //! Divergences from upstream at the time of graduation:
@@ -31,7 +31,7 @@ pub(crate) mod fmt;
 pub mod overhead;
 pub mod pin;
 pub mod ticks;
-pub mod tprobe2;
+pub mod tprobe;
 
 pub use overhead::{Overhead, calibrate};
-pub use tprobe2::{TProbe2, TProbe2RecId};
+pub use tprobe::{TProbe, TProbeRecId};

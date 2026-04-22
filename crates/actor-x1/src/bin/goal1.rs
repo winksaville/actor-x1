@@ -1,7 +1,7 @@
 //! Goal1 binary: two actors on a single thread ping-pong an empty
 //! [`Message`] for a caller-supplied duration in seconds (f64),
 //! after an optional warmup phase. Prints messages-handled /
-//! throughput and a `tprobe2` band-table report of per-dispatch
+//! throughput and a `tprobe` band-table report of per-dispatch
 //! latency.
 //!
 //! Usage: `goal1 --help`

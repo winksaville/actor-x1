@@ -1,11 +1,14 @@
 //! Shared band-table renderer for tick-valued histograms.
 //!
-//! Both `TProbe` (fast path, direct-histogram) and `TProbe2`
-//! (scope API, records → drain) store hardware tick deltas and
-//! want the same band-table output shape — min/p1/…/p99/max
-//! rows with first/last/range/count/mean columns, plus summary
-//! lines for mean, stdev, mean min-p99, stdev min-p99. This
-//! module provides a single implementation both can call into.
+//! [`TProbe`] (scope API, records → drain) stores hardware tick
+//! deltas and wants a consistent band-table output shape —
+//! min/p1/…/p99/max rows with first/last/range/count/mean
+//! columns, plus summary lines for mean, stdev, mean min-p99,
+//! stdev min-p99. This module provides the implementation.
+//!
+//! (Upstream `iiac-perf` also has a `TProbe` fast-path/direct-
+//! histogram variant that shares this renderer; `tprobe` here
+//! only vendored the scope-API probe.)
 //!
 //! Display unit is chosen by `as_ticks`: `false` converts stored
 //! tick values to nanoseconds via [`crate::ticks::ticks_per_ns`];
@@ -25,7 +28,7 @@ const BOUNDARY_NAMES: &[&str] = &[
 
 /// Render a band-table report for `hist`, interpreting stored
 /// values as hardware ticks. `kind` is the header label
-/// (`"tprobe"`, `"tprobe2"`, …) and `name` is the probe's name.
+/// (e.g. `"tprobe"`) and `name` is the probe's name.
 /// `as_ticks=false` converts to ns; `true` keeps raw ticks.
 pub(crate) fn render(kind: &str, name: &str, hist: &Histogram<u64>, as_ticks: bool) {
     let sample_count = hist.len();

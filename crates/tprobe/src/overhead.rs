@@ -1,4 +1,4 @@
-//! Apparatus-overhead calibration for [`TProbe2`]. Measures the
+//! Apparatus-overhead calibration for [`TProbe`]. Measures the
 //! hardware floor cost of two back-to-back `rdtsc` reads — the
 //! bias contaminating every probe scope's stored `end_tsc -
 //! start_tsc` delta — via a two-point fit matching the approach
@@ -40,8 +40,8 @@
 //! actually measuring, and the `black_box(1)` loop_per_iter
 //! doesn't model it anyway.
 //!
-//! [`TProbe2`]: crate::TProbe2
-//! [`TProbe2::report`]: crate::TProbe2::report
+//! [`TProbe`]: crate::TProbe
+//! [`TProbe::report`]: crate::TProbe::report
 
 use std::hint::black_box;
 use std::time::{Duration, Instant};
@@ -66,10 +66,10 @@ pub const N_LOW: u64 = 100;
 pub const N_HIGH: u64 = 10_000;
 
 /// Apparatus-overhead model fitted by [`calibrate`]. Callers pass
-/// a reference to [`TProbe2::report`] (as `Option<&Overhead>`) to
+/// a reference to [`TProbe::report`] (as `Option<&Overhead>`) to
 /// get framing subtracted from each stored per-event value.
 ///
-/// [`TProbe2::report`]: crate::TProbe2::report
+/// [`TProbe::report`]: crate::TProbe::report
 #[derive(Debug, Clone, Copy)]
 pub struct Overhead {
     /// Fitted per-scope framing cost — the bias on every stored

@@ -734,3 +734,88 @@ to `0.2.0-3`.
 - `cargo install --path crates/actor-x1` replaces the prior
   `actor-x1 v0.2.0-1` install; `goal1 --version` and
   `goal2 --version` both report `actor-x1 0.2.0-2`.
+
+## Rename TProbe2 → TProbe (0.2.0-3)
+
+Mechanical rename sweep. `TProbe2` → `TProbe`, `TProbe2RecId`
+→ `TProbeRecId`, `tprobe2.rs` → `tprobe.rs`, and the band-table
+header string `"tprobe2"` → `"tprobe"`. The "2" only carried
+meaning inside upstream `iiac-perf`, where it distinguished
+this scope-API probe from a sibling direct-histogram `TProbe`.
+Inside this standalone crate there's only one probe, so the
+suffix is noise.
+
+- `Cargo.lock`: updated by cargo for the tprobe version bump.
+- `crates/actor-x1/Cargo.toml`: `0.2.0-2` → `0.2.0-3`.
+- `crates/actor-x1/src/runtime.rs`: six textual occurrences of
+  `TProbe2` → `TProbe` (field type, `use`, constructor call,
+  `probe_mut` return type, and two doc-links).
+- `crates/actor-x1/src/bin/goal1.rs`: docstring phrase
+  `` `tprobe2` band-table report `` → `` `tprobe` band-table
+  report ``.
+- `crates/actor-x1/src/bin/goal2.rs`: two copies of the same
+  docstring phrase updated.
+- `crates/tprobe/Cargo.toml`: `0.1.0` → `0.1.1` (patch bump —
+  public API rename).
+- `crates/tprobe/src/lib.rs`: module declaration
+  `pub mod tprobe2` → `pub mod tprobe`; re-export
+  `pub use tprobe2::{TProbe2, TProbe2RecId}` → `pub use
+  tprobe::{TProbe, TProbeRecId}`; two docstring references
+  (`[`tprobe2`]` → `[`tprobe`]`, `[`TProbe2`]` → `[`TProbe`]`).
+- `crates/tprobe/src/tprobe.rs` (was `tprobe2.rs`): file
+  renamed; all `TProbe2` / `TProbe2RecId` identifier
+  occurrences → `TProbe` / `TProbeRecId` (struct defs, impls,
+  tests, doc-links); band-table header string `"tprobe2"` →
+  `"tprobe"`.
+- `crates/tprobe/src/overhead.rs`: four doc-link references
+  `TProbe2` / `TProbe2::report` → `TProbe` / `TProbe::report`.
+- `crates/tprobe/src/band_table.rs`: module-level docstring
+  reworded — previously referenced both `TProbe` (fast path)
+  and `TProbe2` (scope API) from upstream; now notes that
+  only the scope-API probe was vendored and still shares the
+  renderer. Function docstring example list trimmed from
+  `(`"tprobe"`, `"tprobe2"`, …)` to `(e.g. `"tprobe"`)`.
+- `notes/chores-01.md`: this section. Earlier sections that
+  record the arrival of `TProbe2` during Stage 1 (`0.1.0-2`,
+  `0.1.0-3`, `0.1.0-6`) are left as-is — they describe events
+  at the time, when the identifier was literally `TProbe2`.
+- `notes/todo.md`: `Rename TProbe2 → TProbe (0.2.0-3) [[6]]`
+  added to `## Done` + reference.
+
+### Design decisions recorded here
+
+- **Single `replace_all` on `TProbe2` handles both identifiers**
+  because `TProbe2RecId` contains `TProbe2` as a prefix; the
+  substring replacement produces `TProbeRecId` without a
+  separate pass.
+- **The submodule keeps the name `tprobe`**, matching the crate
+  name. External callers reach types via the `pub use` at the
+  crate root (`tprobe::TProbe`); the fully-qualified internal
+  path `tprobe::tprobe::TProbe` is slightly awkward but never
+  written by consumers. The alternative — moving the struct
+  directly into `lib.rs` and eliminating the submodule — would
+  inflate `lib.rs` with ~290 lines of probe implementation
+  and make the crate root less navigable. Keeping the
+  submodule is cheaper for readability.
+- **tprobe version bumps `0.1.0` → `0.1.1`** rather than
+  `0.2.0`. Pre-1.0 semver calls for a minor bump on API break,
+  but `actor-x1` is the only consumer, is updated atomically
+  in the same commit, and doesn't pin a version requirement
+  (path deps skip that). The bump is informational; a patch
+  level is enough to signal "content changed" in cargo's
+  accounting.
+
+### Verification
+
+- `cargo fmt` clean (no reorgs required this time).
+- `cargo clippy --all-targets -- -D warnings` clean across both
+  members.
+- `cargo test` — 22 pass (5 in actor-x1 + 17 in tprobe). Same
+  count as `0.2.0-2`; rename is mechanical so no test delta
+  expected.
+- `cargo install --path crates/actor-x1` replaces the prior
+  `actor-x1 v0.2.0-2` install; both binaries report
+  `actor-x1 0.2.0-3`.
+- No remaining `TProbe2` or `tprobe2` (case-sensitive) in the
+  `crates/` tree per a final grep — confirms the sweep is
+  complete.

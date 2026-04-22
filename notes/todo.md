@@ -23,6 +23,7 @@ and older `## Done` sections are moved to [done.md](done.md) to keep this file s
 - Extract perf into tprobe crate — plan marker (0.2.0-0) [[3]]
 - Workspace layout + tprobe skeleton (0.2.0-1) [[4]]
 - Move perf into tprobe crate (0.2.0-2) [[5]]
+- Rename TProbe2 → TProbe (0.2.0-3) [[6]]
 
 
 # References
@@ -32,3 +33,4 @@ and older `## Done` sections are moved to [done.md](done.md) to keep this file s
 [3]: chores-01.md#extract-perf-into-tprobe-crate--plan-marker-020-0
 [4]: chores-01.md#workspace-layout--tprobe-skeleton-020-1
 [5]: chores-01.md#move-perf-into-tprobe-crate-020-2
+[6]: chores-01.md#rename-tprobe2--tprobe-020-3

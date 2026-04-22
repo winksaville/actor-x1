@@ -3,11 +3,11 @@
 //! `end` (or `end_batch`) rather than `record(ticks)`.
 //!
 //! `start(site_id)` reads the hardware tick counter and returns
-//! an opaque [`TProbe2RecId`] carrying `(site_id, start_tsc)`;
+//! an opaque [`TProbeRecId`] carrying `(site_id, start_tsc)`;
 //! `end(id)` reads the tick counter again and appends a complete
 //! `(site_id, start_tsc, end_tsc, batch=1)` record to the probe's
-//! internal buffer. [`TProbe2::end_batch`] is the same but records
-//! a caller-supplied batch size `n`, which [`TProbe2::report`]
+//! internal buffer. [`TProbe::end_batch`] is the same but records
+//! a caller-supplied batch size `n`, which [`TProbe::report`]
 //! uses to divide the scope's tick delta back down to a per-event
 //! cost before histogram ingestion. No delta math, histogram
 //! ingestion, or tick→ns conversion happens on the hot path.
@@ -21,11 +21,11 @@
 //! Divergences from the `iiac-perf` original that this file was
 //! vendored from:
 //! - [`Record`] gained a `batch: u64` field.
-//! - [`TProbe2::end_batch`] added — scope covers `n` events,
+//! - [`TProbe::end_batch`] added — scope covers `n` events,
 //!   histogram stores per-event cost.
-//! - [`TProbe2::clear`] added — resets records and histogram,
+//! - [`TProbe::clear`] added — resets records and histogram,
 //!   used at the warmup→measurement boundary.
-//! - [`TProbe2::report`] now takes an optional [`Overhead`]
+//! - [`TProbe::report`] now takes an optional [`Overhead`]
 //!   and subtracts the per-event framing correction from each
 //!   stored value at drain time.
 
@@ -35,8 +35,8 @@ use crate::band_table;
 use crate::overhead::Overhead;
 use crate::ticks;
 
-/// Opaque handle returned by [`TProbe2::start`], consumed by
-/// [`TProbe2::end`] or [`TProbe2::end_batch`]. Carries the
+/// Opaque handle returned by [`TProbe::start`], consumed by
+/// [`TProbe::end`] or [`TProbe::end_batch`]. Carries the
 /// caller-supplied `site_id` and the start-time tick reading;
 /// no probe-internal allocation happens at `start` time.
 ///
@@ -44,7 +44,7 @@ use crate::ticks;
 /// leaks the scope (no record is appended).
 #[must_use]
 #[derive(Clone, Copy, Debug)]
-pub struct TProbe2RecId {
+pub struct TProbeRecId {
     site_id: u64,
     start_tsc: u64,
 }
@@ -52,7 +52,7 @@ pub struct TProbe2RecId {
 /// A complete scope record: `(site_id, start_tsc, end_tsc, batch)`.
 /// Appended at `end*` time; the record buffer only ever holds
 /// complete records. Drained into the histogram at
-/// [`TProbe2::report`] time, dividing `end_tsc − start_tsc` by
+/// [`TProbe::report`] time, dividing `end_tsc − start_tsc` by
 /// `batch` so histogram values are always per-event costs.
 #[derive(Clone, Copy, Debug)]
 struct Record {
@@ -66,15 +66,15 @@ struct Record {
 /// A named, single-writer histogram of hardware tick-counter
 /// deltas plus a scope-record buffer. Not `Sync`; cross-thread
 /// *sharing* is out of scope. `Send` so probes can be moved
-/// between threads (e.g. returned via a `JoinHandle<TProbe2>`
+/// between threads (e.g. returned via a `JoinHandle<TProbe>`
 /// on shutdown).
-pub struct TProbe2 {
+pub struct TProbe {
     name: String,
     hist: Histogram<u64>,
     records: Vec<Record>,
 }
 
-impl TProbe2 {
+impl TProbe {
     /// Create an empty probe. Histogram upper bound is 1e12
     /// ticks (~250 s at 4 GHz, ~100 s at 10 GHz), 3 significant
     /// figures.
@@ -92,13 +92,13 @@ impl TProbe2 {
     }
 
     /// Begin a scope. Reads the hardware tick counter and
-    /// returns an opaque [`TProbe2RecId`] carrying `(site_id,
+    /// returns an opaque [`TProbeRecId`] carrying `(site_id,
     /// start_tsc)`. The id must eventually be passed to
-    /// [`TProbe2::end`] or [`TProbe2::end_batch`]; a dropped id
+    /// [`TProbe::end`] or [`TProbe::end_batch`]; a dropped id
     /// leaves no record.
     #[inline]
-    pub fn start(&mut self, site_id: u64) -> TProbe2RecId {
-        TProbe2RecId {
+    pub fn start(&mut self, site_id: u64) -> TProbeRecId {
+        TProbeRecId {
             site_id,
             start_tsc: ticks::read_ticks(),
         }
@@ -106,9 +106,9 @@ impl TProbe2 {
 
     /// End a single-event scope (batch = 1). Reads the hardware
     /// tick counter and appends a complete record. Delta and
-    /// histogram ingestion are deferred to [`TProbe2::report`].
+    /// histogram ingestion are deferred to [`TProbe::report`].
     #[inline]
-    pub fn end(&mut self, tpri: TProbe2RecId) {
+    pub fn end(&mut self, tpri: TProbeRecId) {
         let end_tsc = ticks::read_ticks();
         self.records.push(Record {
             site_id: tpri.site_id,
@@ -126,7 +126,7 @@ impl TProbe2 {
     /// histogram's 0.1 %-relative buckets actually resolve small
     /// variations.
     #[inline]
-    pub fn end_batch(&mut self, tpri: TProbe2RecId, n: u64) {
+    pub fn end_batch(&mut self, tpri: TProbeRecId, n: u64) {
         let end_tsc = ticks::read_ticks();
         self.records.push(Record {
             site_id: tpri.site_id,
@@ -167,7 +167,7 @@ impl TProbe2 {
             };
             self.hist.record(per_event.max(1)).unwrap(); // OK: histogram bounds are [1, 1e12]; per_event.max(1) ≥ 1, and per-event tick deltas stay well under 1e12
         }
-        band_table::render("tprobe2", &self.name, &self.hist, as_ticks);
+        band_table::render("tprobe", &self.name, &self.hist, as_ticks);
     }
 }
 
@@ -177,7 +177,7 @@ mod tests {
 
     #[test]
     fn start_end_appends_one_record() {
-        let mut p = TProbe2::new("t");
+        let mut p = TProbe::new("t");
         let id = p.start(42);
         p.end(id);
         assert_eq!(p.records.len(), 1);
@@ -189,7 +189,7 @@ mod tests {
 
     #[test]
     fn start_end_preserves_start_tsc() {
-        let mut p = TProbe2::new("t");
+        let mut p = TProbe::new("t");
         let id = p.start(7);
         let saved_start = id.start_tsc;
         p.end(id);
@@ -200,7 +200,7 @@ mod tests {
 
     #[test]
     fn start_end_interleaved_non_stack() {
-        let mut p = TProbe2::new("t");
+        let mut p = TProbe::new("t");
         let a = p.start(1);
         let b = p.start(2);
         p.end(a);
@@ -212,7 +212,7 @@ mod tests {
 
     #[test]
     fn end_batch_stores_batch_size() {
-        let mut p = TProbe2::new("t");
+        let mut p = TProbe::new("t");
         let id = p.start(3);
         p.end_batch(id, 100);
         assert_eq!(p.records.len(), 1);
@@ -222,7 +222,7 @@ mod tests {
 
     #[test]
     fn report_divides_batched_delta() {
-        let mut p = TProbe2::new("t");
+        let mut p = TProbe::new("t");
         // Inject a synthetic record: 1000 tick delta, batch 10.
         p.records.push(Record {
             site_id: 0,
@@ -240,7 +240,7 @@ mod tests {
     #[test]
     fn report_subtracts_overhead() {
         use std::time::Duration;
-        let mut p = TProbe2::new("t");
+        let mut p = TProbe::new("t");
         p.records.push(Record {
             site_id: 0,
             start_tsc: 0,
@@ -263,7 +263,7 @@ mod tests {
 
     #[test]
     fn report_drains_records_into_histogram() {
-        let mut p = TProbe2::new("t");
+        let mut p = TProbe::new("t");
         let id1 = p.start(1);
         p.end(id1);
         let id2 = p.start(2);
@@ -282,7 +282,7 @@ mod tests {
 
     #[test]
     fn clear_empties_records_and_hist() {
-        let mut p = TProbe2::new("t");
+        let mut p = TProbe::new("t");
         let id = p.start(1);
         p.end(id);
         p.report(false, None); // moves record into hist
