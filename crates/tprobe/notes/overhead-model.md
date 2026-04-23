@@ -80,29 +80,32 @@ pays.
 
 `Overhead::per_event_ticks(batch)` returns the per-event
 correction `TProbe::report` subtracts from every stored
-value. Currently:
+value:
 
 ```
-correction = framing_ticks / batch
-                └── amortized over the scope
+correction = framing_ticks / batch + loop_per_iter_ticks
+                └── amortized       └── paid per inner
+                    over the scope      iteration
 ```
 
-At `batch = 1` the full framing cost is paid per event; at
-`batch = N` it is spread across `N` events, rounding toward
-zero as `N` grows. `loop_per_iter_ticks` is kept on the
-`Overhead` struct for diagnostic visibility but is not
-currently subtracted.
+At `batch = 1` the framing term is paid in full; at
+`batch = N` it is spread across `N` events and rounds
+toward zero as `N` grows. `loop_per_iter_ticks` is added
+back because the real measurement loop pays per-iter
+scaffolding (loop branch + counter increment) that the
+empty-bench fit captures. The sum is rounded to the
+nearest tick.
 
-The bot thinks extending subtraction to include
-`loop_per_iter_ticks` is the right call: loop scaffolding
-is overhead relative to the dispatch work, and the
-`black_box(1)` iter cost is a close-enough proxy. The
-tradeoff is a small downward bias on reported values
-because the real loop doesn't execute the `black_box(1)`
-itself; the bias is on the order of a tick per event and
-worth the simpler story in the output. That change is
-planned for a later step in the 0.3.0 ladder; this document
-gets revised then.
+The bot thinks this matches "cost of the work alone" more
+closely than framing-only subtraction: the real loop's
+per-iter scaffolding is structural overhead relative to
+the dispatch work, and `black_box(1)`'s iter cost is a
+reasonable proxy. The tradeoff is a small downward bias —
+the real loop doesn't execute the `black_box(1)` itself,
+so the measured `loop_per_iter_ticks` is slightly larger
+than the real loop's scaffolding. The bot thinks the bias
+is on the order of a tick per event and is worth the
+simpler story in the output.
 
 ## Per-event correction when batches mix
 

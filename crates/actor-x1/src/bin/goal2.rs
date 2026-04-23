@@ -131,12 +131,19 @@ fn main() {
         n = results.len(),
     );
     if let Some(ovh) = &overhead {
-        let framing_ns = ovh.framing_ticks as f64 / ticks::ticks_per_ns();
+        let tpn = ticks::ticks_per_ns();
+        let framing_ns = ovh.framing_ticks as f64 / tpn;
+        let lpi_ns = ovh.loop_per_iter_ticks / tpn;
         let per_event_tk = ovh.per_event_ticks(1);
-        let per_event_ns = per_event_tk as f64 / ticks::ticks_per_ns();
+        let per_event_ns = per_event_tk as f64 / tpn;
         println!(
-            "  apparatus: framing={} tk ({:.2} ns); per-event at inner=1 = {} tk ({:.2} ns)",
-            ovh.framing_ticks, framing_ns, per_event_tk, per_event_ns,
+            "  apparatus: framing={} tk ({:.2} ns); loop_per_iter={:.2} tk ({:.2} ns); per-event at inner=1 = {} tk ({:.2} ns)",
+            ovh.framing_ticks,
+            framing_ns,
+            ovh.loop_per_iter_ticks,
+            lpi_ns,
+            per_event_tk,
+            per_event_ns,
         );
     } else {
         println!("  apparatus: raw (no overhead subtraction)");

@@ -1068,6 +1068,62 @@ shortening.
   is four static files that never change; the bot thinks
   the payoff outweighs the noise.
 
+## Extend subtraction to framing + loop_per_iter (0.3.0-2)
+
+Extends `Overhead::per_event_ticks` to include the
+per-iteration `loop_per_iter_ticks` cost alongside the
+per-scope amortized framing cost. The real measurement
+loop pays per-iter scaffolding (loop branch + counter
+increment) that the empty-bench calibration captures as
+`loop_per_iter_ticks`; subtracting it matches "cost of the
+work alone" more closely than framing-only subtraction.
+The apparatus diagnostic line now shows both components so
+readers can see the split. Behavior change is display-only
+in the band-table body (raw stored values depend on the
+correction); reported numbers drop by ~`loop_per_iter` per
+event (typically on the order of one tick).
+
+- `crates/actor-x1/Cargo.toml`: `0.3.0-1` → `0.3.0-2`.
+- `crates/tprobe/src/overhead.rs`:
+  `Overhead::per_event_ticks(batch)` returns
+  `(framing_ticks / batch + loop_per_iter_ticks)` computed
+  in `f64` and rounded to nearest `u64`. Docstring updated
+  to describe both terms and point at `notes/overhead-model.md`.
+  New test `per_event_ticks_adds_loop_per_iter` covers the
+  combined formula at three batch sizes. Existing
+  `per_event_ticks_amortizes_framing` still passes unchanged
+  (it uses `loop_per_iter_ticks = 0.0`); comment tweaked
+  from "truncates" to "rounds".
+- `crates/actor-x1/src/bin/goal1.rs`,
+  `crates/actor-x1/src/bin/goal2.rs`: `apparatus:` line
+  gains a `loop_per_iter=X.XX tk (X.XX ns)` segment between
+  the framing segment and the per-event total.
+- `crates/tprobe/notes/overhead-model.md`: subtraction-policy
+  section rewritten to describe the combined formula. The
+  earlier "planned for a later step" language is gone;
+  rationale for including `loop_per_iter` stays (closer
+  match to "cost of the work alone", small downward bias
+  because the real loop doesn't run the `black_box(1)`).
+
+### Design decisions recorded here
+
+- **Round the combined correction, not each term
+  independently.** Framing per event can be sub-tick at
+  large `batch` (e.g. `21 / 1000 = 0.021`), and
+  `loop_per_iter_ticks` can also be fractional. Adding in
+  `f64` and rounding once preserves the combined precision
+  (`0.021 + 1.2 ≈ 1.22 → 1`) rather than independently
+  rounding each term down to zero and subtracting nothing.
+- **`round().max(0.0) as u64`.** Calibration guarantees
+  both terms are non-negative (framing clamps at 0,
+  `loop_per_iter` does the same when the fit goes the
+  wrong way), so the `max(0.0)` is belt-and-suspenders
+  against an out-of-bounds cast. Cheap.
+- **No change to histogram semantics.** `TProbe::report`
+  still subtracts the per-event correction and clamps at
+  1 (the histogram lower bound). Only the correction value
+  changes; the subtraction path is untouched.
+
 ## Future work: linkme/inventory benchmark harness
 
 Idea captured during `0.3.0-0`; not scheduled for

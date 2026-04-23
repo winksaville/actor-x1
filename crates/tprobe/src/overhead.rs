@@ -59,12 +59,16 @@ pub struct Overhead {
 }
 
 impl Overhead {
-    /// Per-event framing correction at a given `batch`, in ticks:
-    /// the framing is paid once per scope and amortized across
-    /// `batch` events. Integer division truncates toward zero, so
-    /// at `batch > framing_ticks` the correction rounds to zero.
+    /// Per-event overhead correction at a given `batch`, in ticks.
+    /// Framing is paid once per scope and amortized across `batch`
+    /// events; `loop_per_iter_ticks` is paid every inner iteration.
+    /// The sum is rounded to the nearest tick.
+    ///
+    /// See `notes/overhead-model.md` for the formal model.
     pub fn per_event_ticks(&self, batch: u64) -> u64 {
-        self.framing_ticks / batch.max(1)
+        let framing_per_event = self.framing_ticks as f64 / batch.max(1) as f64;
+        let correction = framing_per_event + self.loop_per_iter_ticks;
+        correction.round().max(0.0) as u64
     }
 }
 
@@ -137,8 +141,25 @@ mod tests {
         };
         assert_eq!(ovh.per_event_ticks(1), 20);
         assert_eq!(ovh.per_event_ticks(10), 2);
-        assert_eq!(ovh.per_event_ticks(100), 0); // truncates
+        assert_eq!(ovh.per_event_ticks(100), 0); // 0.2 rounds to 0
         assert_eq!(ovh.per_event_ticks(0), 20); // batch=0 treated as 1
+    }
+
+    #[test]
+    fn per_event_ticks_adds_loop_per_iter() {
+        let ovh = Overhead {
+            framing_ticks: 20,
+            loop_per_iter_ticks: 1.5,
+            cal_raw_low_ticks: 0,
+            cal_raw_high_ticks: 0,
+            cal_duration: Duration::from_millis(1),
+        };
+        // batch=1:   20 + 1.5 = 21.5  → 22
+        assert_eq!(ovh.per_event_ticks(1), 22);
+        // batch=10:   2 + 1.5 =  3.5  →  4
+        assert_eq!(ovh.per_event_ticks(10), 4);
+        // batch=1000: 0.02 + 1.5 = 1.52 →  2
+        assert_eq!(ovh.per_event_ticks(1000), 2);
     }
 
     #[test]
