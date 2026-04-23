@@ -9,7 +9,7 @@ See [Chores format](README.md#chores-format)
 
 ## Stage 1 runtime — plan marker (0.1.0-0)
 
-Begins the Stage 1 implementation described in [design.md](design.md).
+Begins the Stage 1 implementation described in [design.md](../crates/actor-x1/notes/design.md).
 Multi-step ladder (see [Versioning during development](../CLAUDE.md#versioning)):
 
 - `0.1.0-0` — bootstrap Cargo crate + this plan marker (no behavior).
@@ -539,7 +539,7 @@ No behavior changes vs 0.1.0-8; this is the "done" marker.
 
 ### What's next
 
-Stage 2 (see [design.md](design.md)): three actors, a richer
+Stage 2 (see [design.md](../crates/actor-x1/notes/design.md)): three actors, a richer
 `Message` with `src_id` / `dst_id` / `send_count`, per-actor
 constructors and names. Promoting the vendored perf stack to a
 shared library crate is also on the radar once Stage 2 exposes
@@ -872,7 +872,7 @@ change vs. `0.2.0-3`; this is the closing marker.
 
 ### What's next
 
-Stage 2 (see [design.md](design.md)): three actors with a
+Stage 2 (see [design.md](../crates/actor-x1/notes/design.md)): three actors with a
 richer `Message { src_id, dst_id, send_count }`, per-actor
 constructors, and names. `tprobe`'s API settled enough in
 this ladder that promoting it to a sibling repo (if ever
@@ -964,7 +964,111 @@ Multi-step ladder:
   chronology, workspace-level todo/done; each crate's own
   design, architecture, and model notes travel with it.
 
-## Future work: linkme/inventory benchmark harness (0.3.0-0)
+## Notes reorg + per-crate READMEs + overhead-model.md (0.3.0-1)
+
+Docs-only step. Creates per-crate `notes/` directories and
+`README.md` files so each crate carries its own documentation
+with it if/when the workspace splits into separate repos.
+Moves the actor-model design from workspace `/notes/` into
+`crates/actor-x1/notes/`. Writes a new
+`crates/tprobe/notes/overhead-model.md` that formalizes the
+overhead vocabulary: framing, `loop_per_iter`, and the
+unmeasurable "everything else" category that stays in the
+measurement. Replaces long prose blocks in `overhead.rs` /
+`lib.rs` with brief summaries plus pointers to the notes.
+No behavior change; code edits are purely doc-comment
+shortening.
+
+- `crates/actor-x1/Cargo.toml`: `0.3.0-0` → `0.3.0-1`.
+- `crates/actor-x1/notes/design.md`: moved from
+  `/notes/design.md` (unchanged content).
+- `crates/actor-x1/README.md`: new. Brief per-crate README
+  — binaries, install command, link to `notes/design.md`,
+  license pointer.
+- `crates/actor-x1/LICENSE-MIT`, `crates/actor-x1/LICENSE-APACHE`:
+  copied from workspace root so the crate is self-contained
+  if the workspace is split into separate repos later.
+- `crates/actor-x1/src/lib.rs`: `notes/design.md` path in
+  the module docstring → `crates/actor-x1/notes/design.md`.
+- `crates/tprobe/README.md`: new. Brief per-crate README —
+  at-a-glance usage, public surface, links to
+  `notes/design.md` and `notes/overhead-model.md`, platform
+  note.
+- `crates/tprobe/LICENSE-MIT`, `crates/tprobe/LICENSE-APACHE`:
+  copied from workspace root (same reason as actor-x1).
+- `crates/tprobe/notes/design.md`: new. Architecture
+  (records → drain → histogram → band-table), hot-path vs
+  cold-path split, module layout, and upstream vendoring
+  history (moved here from `lib.rs`).
+- `crates/tprobe/notes/overhead-model.md`: new. Formal
+  definitions of framing and `loop_per_iter` (with the
+  two-point-fit derivation), the unmeasurable overhead
+  category (cache misses, context switches, interrupts,
+  etc.) and why it stays in the measurement, the current
+  subtraction policy (framing only), a flagged intent to
+  extend subtraction to `loop_per_iter` later in the
+  ladder, and a note on per-band correction if `batch`
+  ever mixes within one probe drain.
+- `crates/tprobe/src/lib.rs`: module docstring collapsed to
+  a one-sentence description plus pointers at
+  `notes/design.md` and `notes/overhead-model.md`. The
+  vendoring history and file list move into
+  `notes/design.md`.
+- `crates/tprobe/src/overhead.rs`: module docstring
+  collapsed to a brief description plus a pointer at
+  `notes/overhead-model.md`. The "why two-point" and "what
+  gets subtracted" sections move into `notes/overhead-model.md`.
+- `README.md`: `notes/design.md` link target updated to
+  `crates/actor-x1/notes/design.md`.
+- `notes/README.md`: `design.md` link target updated to
+  `../crates/actor-x1/notes/design.md`.
+- `notes/chores-01.md`: this section; historical `[design.md](design.md)`
+  link targets retargeted to `../crates/actor-x1/notes/design.md`
+  so the links continue to resolve.
+- `notes/todo.md`: reference `[1]` retargeted to the new
+  `design.md` location; plan-marker `[8]` moves from
+  `## In Progress` to `## Done`; new entry for this step
+  added to `## In Progress` with reference `[10]`.
+
+### Design decisions recorded here
+
+- **overhead-model.md reflects *current* code, not
+  planned.** Policy section states framing-only subtraction
+  and marks the extension to `loop_per_iter` as "planned
+  for a later step in the 0.3.0 ladder". When that step
+  lands, this file's subtraction-policy section gets
+  updated in place. Keeps the doc in sync with code
+  step-by-step rather than describing an end state that
+  temporarily disagrees with what's shipping.
+- **Doc comments use crate-root-relative paths
+  (`notes/overhead-model.md`)**, not workspace-relative
+  (`crates/tprobe/notes/overhead-model.md`). If `tprobe` is
+  ever published to crates.io, the `notes/` directory ships
+  inside the crate package, so a crate-root-relative path
+  resolves both in-workspace and for downstream consumers.
+- **Historical chore sections retain their original text.**
+  Earlier sections (Stage 1, 0.2.0 ladder) describe events
+  at the time they happened; their wording is preserved,
+  only the `[design.md](…)` link *targets* are updated so
+  the references continue to resolve after the move.
+- **Vendoring history lives in
+  `crates/tprobe/notes/design.md`.** Previously the
+  `tprobe` crate's `lib.rs` carried the full upstream
+  divergence list. Moving it to the notes file makes
+  `lib.rs` easier to scan without losing the history; it
+  remains discoverable via the pointer at the top of
+  `lib.rs`.
+- **License files copied into each crate.** Workspace root
+  still has `LICENSE-MIT` / `LICENSE-APACHE`; each crate
+  now also has its own copies. `cargo package` only bundles
+  files inside the crate directory, so per-crate copies are
+  what ends up in the distributed artifact on crates.io.
+  Splitting a crate into its own repo later becomes a
+  straight directory move with nothing to chase down. Cost
+  is four static files that never change; the bot thinks
+  the payoff outweighs the noise.
+
+## Future work: linkme/inventory benchmark harness
 
 Idea captured during `0.3.0-0`; not scheduled for
 implementation yet. Explores using compile-time static

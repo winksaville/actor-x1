@@ -1,7 +1,8 @@
 # actor-x1
 
 An experiment in creating an actor model in rust
-see [notes/design.md](notes/design.md) for details.
+see [crates/actor-x1/notes/design.md](crates/actor-x1/notes/design.md)
+for details.
 
 This is the main repo of a dual-repo convention for using
 a bot to help in the development of a coding project. The goal

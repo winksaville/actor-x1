@@ -1,6 +1,6 @@
 //! actor-x1 — an experiment in the actor model in Rust.
 //!
-//! See `notes/design.md` for the staged design. Stage 1 provides
+//! See `crates/actor-x1/notes/design.md` for the staged design. Stage 1 provides
 //! a minimal runtime with two actors that ping-pong an empty
 //! [`Message`] for a caller-supplied duration; Goal1 runs both
 //! actors on one thread, Goal2 runs each actor on its own thread.

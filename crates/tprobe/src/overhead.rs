@@ -1,44 +1,12 @@
-//! Apparatus-overhead calibration for [`TProbe`]. Measures the
-//! hardware floor cost of two back-to-back `rdtsc` reads — the
-//! bias contaminating every probe scope's stored `end_tsc -
-//! start_tsc` delta — via a two-point fit matching the approach
-//! in `iiac-perf/src/overhead.rs`.
+//! Apparatus-overhead calibration for [`TProbe`]. Runs a
+//! two-point fit on an empty `black_box(1)` bench and produces
+//! an [`Overhead`] struct; [`TProbe::report`] subtracts the
+//! per-event correction from each stored scope delta.
 //!
-//! ### Why two-point, not single-point
-//!
-//! `rdtsc` isn't a serializing instruction. Two back-to-back
-//! reads with nothing between can execute out-of-order and
-//! measure a delta of 0–1 ticks — far below the true framing
-//! cost. Bracketing with `_mm_lfence` overcorrects (lfence drains
-//! the pipeline, which real work doesn't fully do), so single-
-//! point measurement is biased in both directions.
-//!
-//! Two-point fits a line through empty benches at two `inner`
-//! sizes (`N_LOW`, `N_HIGH`):
-//! - raw delta at inner=N = framing + N · loop_per_iter
-//! - slope between (N_LOW, raw_low) and (N_HIGH, raw_high) gives
-//!   loop_per_iter; intercept gives framing.
-//!
-//! The `black_box(1)` inside the inner loop keeps OoO from
-//! collapsing iterations and gives `loop_per_iter` a consistent
-//! value. Noise amplification on framing:
-//! `d(framing)/d(raw_low) = N_HIGH / (N_HIGH − N_LOW)`. At
-//! 100/10_000 that's ~1.01 — any slop on `raw_low` propagates
-//! roughly 1:1 to framing.
-//!
-//! We fit using raw tick deltas (not per-event values) in `f64`
-//! arithmetic so integer truncation can't hide small framing
-//! components.
-//!
-//! ### What gets subtracted
-//!
-//! Only framing. The two-point fit also yields
-//! `loop_per_iter_ticks` (cost of one black_box iteration), which
-//! we keep on the [`Overhead`] struct for diagnostics but do not
-//! subtract from probe samples — the caller's inner-loop cost
-//! (queue pop, deadline check, etc.) is part of what the user is
-//! actually measuring, and the `black_box(1)` loop_per_iter
-//! doesn't model it anyway.
+//! For the formal model — framing, `loop_per_iter`, the
+//! unmeasurable "everything else" category, the two-point
+//! derivation, and the current subtraction policy — see
+//! `notes/overhead-model.md`.
 //!
 //! [`TProbe`]: crate::TProbe
 //! [`TProbe::report`]: crate::TProbe::report

@@ -1,6 +1,6 @@
 # Notes
 
-See [design.md](design.md)
+See [design.md](../crates/actor-x1/notes/design.md)
 
 
 ## jj tips
