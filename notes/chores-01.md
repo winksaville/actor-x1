@@ -878,3 +878,148 @@ constructors, and names. `tprobe`'s API settled enough in
 this ladder that promoting it to a sibling repo (if ever
 wanted) would now be a straightforward copy rather than
 another extraction round.
+
+## Band-table format + overhead docs — plan marker (0.3.0-0)
+
+Reworks the band-table report so the existing columns show
+raw (unadjusted) values and a new rightmost `adj mean` column
+shows the overhead-subtracted mean. Along the way, formalizes
+what "overhead" means in `tprobe` — framing, loop-per-iter,
+and an unmeasurable "everything else" category — and extends
+the subtraction to include `loop_per_iter_ticks` on top of
+framing. CLI is simplified: `--raw` goes away (calibration is
+~10 ms, always run), and the `--warmup` default drops from 10 s
+to 0.5 s so quick iteration doesn't require typing
+`--warmup 0` every time. Notes are split per crate in
+preparation for eventually separating the two crates into
+their own repos.
+
+Multi-step ladder:
+
+- `0.3.0-0` — Plan marker. Bump `actor-x1` to `0.3.0-0`; this
+  chore section; `notes/todo.md` entry under `## In Progress`.
+  No structural change.
+- `0.3.0-1` — Notes reorg + per-crate `README.md` +
+  `overhead-model.md`. Move `notes/design.md` →
+  `crates/actor-x1/notes/design.md`. Create
+  `crates/actor-x1/notes/`, `crates/tprobe/notes/`,
+  `crates/actor-x1/README.md`, `crates/tprobe/README.md`.
+  Write `crates/tprobe/notes/overhead-model.md` defining
+  framing, loop-per-iter, and the unmeasurable-overhead
+  category (cache misses, branch mispredicts, context
+  switches, interrupts — they stay in the measurement because
+  we can't attribute them per-event). Replace long prose in
+  `overhead.rs` / `tprobe.rs` doc comments with pointers to
+  `overhead-model.md`. Docs-only; no behavior change.
+- `0.3.0-2` — Extend subtraction to framing + loop-per-iter.
+  `Overhead::per_event_ticks(batch)` returns
+  `framing_ticks / batch + loop_per_iter_ticks` instead of
+  just `framing_ticks / batch`. `apparatus:` line shows both
+  components so readers see the split. Tests updated.
+- `0.3.0-3` — Band-table `adj mean` column. `TProbe::report`
+  stores raw per-event values in the histogram (no correction
+  applied). `band_table::render` gains an optional per-event
+  correction; existing `first` / `last` / `range` / `count` /
+  `mean` columns show raw; new rightmost `adj mean` column
+  shows `raw − correction`. Summary rows `mean` and
+  `mean min-p99` get adj values in the new column; `stdev`
+  rows leave it blank (shift-invariant). Uses global-average
+  correction (exact for today's constant-batch PoC; a note in
+  `overhead-model.md` flags where per-band tracking would be
+  needed if batches ever mix within one probe).
+- `0.3.0-4` — Remove `--raw` flag. Drop the flag from `goal1`
+  and `goal2`; calibration runs unconditionally. Drop the
+  "raw (no overhead subtraction)" apparatus-line branch.
+- `0.3.0-5` — Warmup default `10.0 → 0.5`. Both binaries.
+- `0.3.0` — Closing marker. Drop `-N` suffix on `actor-x1`;
+  top-level `README.md` updated for new output format, no
+  `--raw`, new warmup default, per-crate READMEs. Move
+  `notes/todo.md` entries to `## Done`.
+
+### Design decisions recorded here
+
+- **Extend subtraction to `loop_per_iter_ticks`.** Earlier
+  (`0.1.0-6`) the subtraction was deliberately scoped to
+  framing only, on the grounds that "the real dispatch loop's
+  per-iter cost is part of what the user wants to measure".
+  Revisited: the real loop's scaffolding (loop branch,
+  counter increment) is structural overhead relative to the
+  dispatch work, and `black_box(1)`'s `loop_per_iter_ticks`
+  is a close-enough proxy for it. Biased slightly low
+  because the real loop doesn't execute the `black_box`
+  itself; the bias is small and worth the simpler story in
+  the output. `overhead-model.md` records this tradeoff
+  explicitly.
+- **Global average correction, not per-band.** Correction
+  depends on `batch`; in the current PoC every record in a
+  given probe has the same `batch`, so a single constant
+  correction applies uniformly. If later probes ever mix
+  `batch` sizes within one drain, a per-band correction sum
+  would be more faithful. Deferred until that situation
+  actually arises; `overhead-model.md` flags the extension
+  point.
+- **Per-crate `notes/` and `README.md`.** Anticipates
+  splitting the crates into separate repos later. Workspace
+  `/notes/` keeps format conventions, VCS tips, release
+  chronology, workspace-level todo/done; each crate's own
+  design, architecture, and model notes travel with it.
+
+## Future work: linkme/inventory benchmark harness (0.3.0-0)
+
+Idea captured during `0.3.0-0`; not scheduled for
+implementation yet. Explores using compile-time static
+registration (`linkme` distributed slices or `inventory` via
+`ctor`) to build a `tprobe`-driven benchmark runner where
+individual benchmarks declare themselves in separate files
+and the runner picks them up with no `main()` edits per
+benchmark — the ergonomic pattern criterion-rs offers.
+
+### Fit for benchmarks
+
+The bot thinks this is a strong fit. Each benchmark file
+drops in a `bench!(...)` invocation; the runner iterates
+the registered entries, sets up warmup/calibration/pin
+config once, and prints a `tprobe` band table per
+benchmark. The measurement primitive already exists
+(`tprobe`); the missing piece is the registration and
+iteration layer. Result: adding a benchmark is a
+one-file change with no central table to edit.
+
+### Fit for actor applications
+
+The bot thinks this is a partial fit. Registration gives
+discovery ("enumerate every `Actor` type the binary
+knows"), but actor construction still needs runtime config
+— id, name, channel endpoints, thread placement — which
+lives in `main` / runtime setup rather than at declaration
+sites. Useful if we find ourselves hand-editing a registry
+table per new actor; not a silver bullet for the full
+wiring problem.
+
+### Tradeoffs to validate before committing
+
+- `linkme` uses linker-section magic. Works on
+  `x86_64-unknown-linux-gnu` (our target) out of the box;
+  the bot thinks aggressive `strip` / LTO / unusual link
+  modes could in principle drop registrations, so a
+  release-mode smoke test with our actual flags is worth
+  doing before relying on it.
+- `inventory` uses static constructors (via `ctor`).
+  Broader platform support, pays a small init-time cost.
+  The bot thinks the main historical failure mode is
+  reachability elision — a registration in a
+  conditionally-compiled or test-only module silently not
+  registering — which is usually fine in a binary crate
+  but worth a sanity check.
+- Both approaches lose the "grep `main.rs` to see every
+  registered item" property. Taste call; the bot thinks
+  the file-per-benchmark ergonomic outweighs it for
+  benchmarks, and the call is less clear for actors.
+
+### Recommendation
+
+The bot's suggested order: start with the benchmark
+harness (clear win, bounded scope), learn the mechanism,
+then decide whether the actor-registration case justifies
+a second use. Tracked as a todo entry (`[9]`) against this
+section; promote to a versioned plan marker when scheduled.
