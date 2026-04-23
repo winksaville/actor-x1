@@ -27,10 +27,25 @@ const BOUNDARY_NAMES: &[&str] = &[
 ];
 
 /// Render a band-table report for `hist`, interpreting stored
-/// values as hardware ticks. `kind` is the header label
-/// (e.g. `"tprobe"`) and `name` is the probe's name.
+/// values as hardware ticks (raw — no overhead subtraction is
+/// applied to histogram-stored values). `kind` is the header
+/// label (e.g. `"tprobe"`) and `name` is the probe's name.
 /// `as_ticks=false` converts to ns; `true` keeps raw ticks.
-pub(crate) fn render(kind: &str, name: &str, hist: &Histogram<u64>, as_ticks: bool) {
+///
+/// `correction` (in ticks) is the per-event overhead to display
+/// in an `adj mean` column alongside the raw mean. If `Some(c)`,
+/// each band's / summary row's raw mean has `c` subtracted
+/// (clamped at 0) for the `adj mean` column. `stdev` rows leave
+/// that column blank — stdev is shift-invariant. If `None`, no
+/// adj column is rendered and the output matches the pre-0.3.0
+/// layout.
+pub(crate) fn render(
+    kind: &str,
+    name: &str,
+    hist: &Histogram<u64>,
+    as_ticks: bool,
+    correction: Option<u64>,
+) {
     let sample_count = hist.len();
     println!("  {kind}: {name} [count={}]", fmt_commas(sample_count));
     if sample_count == 0 {
@@ -42,6 +57,8 @@ pub(crate) fn render(kind: &str, name: &str, hist: &Histogram<u64>, as_ticks: bo
     let tpn = ticks::ticks_per_ns();
     let conv = |v: u64| -> f64 { if as_ticks { v as f64 } else { v as f64 / tpn } };
     let conv_f = |v: f64| -> f64 { if as_ticks { v } else { v / tpn } };
+    let correction_ticks_f = correction.map(|c| c as f64).unwrap_or(0.0);
+    let show_adj = correction.is_some();
 
     let n_bands = BOUNDARY_PCTS.len() - 1;
     let mut band_first = vec![u64::MAX; n_bands];
@@ -72,21 +89,24 @@ pub(crate) fn render(kind: &str, name: &str, hist: &Histogram<u64>, as_ticks: bo
         range: String,
         count: String,
         mean: String,
+        adj_mean: String,
     }
 
     let mut rows: Vec<BandRow> = Vec::new();
     for i in 0..n_bands {
         let count = band_count[i];
-        let (first_v, last_v, range_v, mean_v) = if count == 0 {
-            (0.0, 0.0, 0.0, 0.0)
+        let (first_v, last_v, range_v, mean_v, adj_mean_v) = if count == 0 {
+            (0.0, 0.0, 0.0, 0.0, 0.0)
         } else {
-            let mean_val = band_sum[i] as f64 / count as f64;
+            let mean_ticks = band_sum[i] as f64 / count as f64;
+            let adj_ticks = (mean_ticks - correction_ticks_f).max(0.0);
             let range_raw = band_last[i] - band_first[i] + 1;
             (
                 conv(band_first[i]),
                 conv(band_last[i]),
                 conv(range_raw),
-                conv_f(mean_val),
+                conv_f(mean_ticks),
+                conv_f(adj_ticks),
             )
         };
         rows.push(BandRow {
@@ -96,68 +116,24 @@ pub(crate) fn render(kind: &str, name: &str, hist: &Histogram<u64>, as_ticks: bo
             range: fmt_commas_f64(range_v, 0),
             count: fmt_commas(count),
             mean: fmt_commas_f64(mean_v, 0),
+            adj_mean: fmt_commas_f64(adj_mean_v, 0),
         });
     }
 
-    let label_w = rows
-        .iter()
-        .map(|r| r.label.len())
-        .max()
-        .unwrap_or(0) // OK: rows always contains n_bands=12 entries after the loop above
-        .max("stdev min-p99".len());
-    let first_w = rows.iter().map(|r| r.first.len()).max().unwrap_or(0); // OK: rows always contains n_bands=12 entries
-    let last_w = rows.iter().map(|r| r.last.len()).max().unwrap_or(0); // OK: rows always contains n_bands=12 entries
-    let range_w = rows.iter().map(|r| r.range.len()).max().unwrap_or(0); // OK: rows always contains n_bands=12 entries
-    let count_w = rows.iter().map(|r| r.count.len()).max().unwrap_or(0); // OK: rows always contains n_bands=12 entries
-    let mean_w = rows.iter().map(|r| r.mean.len()).max().unwrap_or(0); // OK: rows always contains n_bands=12 entries
+    // Summary row values. Raw strings always; adj strings only
+    // meaningful when `show_adj`.
+    let hist_mean_ticks = hist.mean();
+    let hist_stdev_ticks = hist.stdev();
+    let hist_mean_str = fmt_commas_f64(conv_f(hist_mean_ticks), 0);
+    let hist_mean_adj_str =
+        fmt_commas_f64(conv_f((hist_mean_ticks - correction_ticks_f).max(0.0)), 0);
+    let hist_stdev_str = fmt_commas_f64(conv_f(hist_stdev_ticks), 0);
 
-    const INDENT: &str = "    ";
-    const GAP: &str = "    ";
-
-    let first_col = INDENT.len() + label_w + 1 + first_w;
-    let unit_len = 1 + unit.len();
-    let last_gap = unit_len + GAP.len() + last_w;
-    let range_gap = unit_len + GAP.len() + range_w;
-    let count_gap = unit_len + GAP.len() + count_w;
-    let mean_gap = GAP.len() + mean_w;
-    println!(
-        "{:>first_col$}{:>last_gap$}{:>range_gap$}{:>count_gap$}{:>mean_gap$}",
-        "first", "last", "range", "count", "mean",
-    );
-
-    for r in &rows {
-        println!(
-            "{INDENT}{:<label_w$} {:>first_w$} {unit}{GAP}{:>last_w$} {unit}{GAP}{:>range_w$} {unit}{GAP}{:>count_w$}{GAP}{:>mean_w$} {unit}",
-            r.label, r.first, r.last, r.range, r.count, r.mean,
-        );
-    }
-
-    let hist_mean = hist.mean();
-    let skip = first_w
-        + unit_len
-        + GAP.len()
-        + last_w
-        + unit_len
-        + GAP.len()
-        + range_w
-        + unit_len
-        + GAP.len()
-        + count_w;
-    println!(
-        "{INDENT}{:<label_w$} {:>skip$}{GAP}{:>mean_w$} {unit}",
-        "mean",
-        "",
-        fmt_commas_f64(conv_f(hist_mean), 0),
-    );
-    println!(
-        "{INDENT}{:<label_w$} {:>skip$}{GAP}{:>mean_w$} {unit}",
-        "stdev",
-        "",
-        fmt_commas_f64(conv_f(hist.stdev()), 0),
-    );
-
+    // Trimmed (min-p99) stats. `have_trim` is true when the
+    // first 11 bands hold any samples; if all samples land in
+    // `p99-max`, the trimmed summary is skipped.
     let trim_count: u64 = band_count[..n_bands - 1].iter().sum();
-    if trim_count > 0 {
+    let (trim_mean_str, trim_mean_adj_str, trim_stdev_str, have_trim) = if trim_count > 0 {
         let trim_sum: u128 = band_sum[..n_bands - 1].iter().sum();
         let trim_mean = trim_sum as f64 / trim_count as f64;
 
@@ -184,19 +160,140 @@ pub(crate) fn render(kind: &str, name: &str, hist: &Histogram<u64>, as_ticks: bo
         } else {
             0.0
         };
-
-        println!(
-            "{INDENT}{:<label_w$} {:>skip$}{GAP}{:>mean_w$} {unit}",
-            "mean min-p99",
-            "",
+        let trim_mean_adj = (trim_mean - correction_ticks_f).max(0.0);
+        (
             fmt_commas_f64(conv_f(trim_mean), 0),
+            fmt_commas_f64(conv_f(trim_mean_adj), 0),
+            fmt_commas_f64(conv_f(trim_stdev), 0),
+            true,
+        )
+    } else {
+        (String::new(), String::new(), String::new(), false)
+    };
+
+    let label_w = rows
+        .iter()
+        .map(|r| r.label.len())
+        .max()
+        .unwrap_or(0) // OK: rows always contains n_bands=12 entries after the loop above
+        .max("stdev min-p99".len());
+    let first_w = rows.iter().map(|r| r.first.len()).max().unwrap_or(0); // OK: rows always contains n_bands=12 entries
+    let last_w = rows.iter().map(|r| r.last.len()).max().unwrap_or(0); // OK: rows always contains n_bands=12 entries
+    let range_w = rows.iter().map(|r| r.range.len()).max().unwrap_or(0); // OK: rows always contains n_bands=12 entries
+    let count_w = rows.iter().map(|r| r.count.len()).max().unwrap_or(0); // OK: rows always contains n_bands=12 entries
+    let mean_w = rows
+        .iter()
+        .map(|r| r.mean.len())
+        .max()
+        .unwrap_or(0) // OK: rows always contains n_bands=12 entries
+        .max(hist_mean_str.len())
+        .max(hist_stdev_str.len())
+        .max(trim_mean_str.len())
+        .max(trim_stdev_str.len());
+    let adj_w = if show_adj {
+        rows.iter()
+            .map(|r| r.adj_mean.len())
+            .max()
+            .unwrap_or(0) // OK: rows always contains n_bands=12 entries
+            .max(hist_mean_adj_str.len())
+            .max(trim_mean_adj_str.len())
+    } else {
+        0
+    };
+
+    const INDENT: &str = "    ";
+    const GAP: &str = "    ";
+    // Extra separation before the `adj mean` column so the
+    // derived value is visually distinct from the raw columns.
+    const ADJ_SEP: &str = "        ";
+
+    let first_col = INDENT.len() + label_w + 1 + first_w;
+    let unit_len = 1 + unit.len();
+    let last_gap = unit_len + GAP.len() + last_w;
+    let range_gap = unit_len + GAP.len() + range_w;
+    let count_gap = unit_len + GAP.len() + count_w;
+    let mean_gap = GAP.len() + mean_w;
+    // Data-cell width in the adj column, including the trailing
+    // space + unit (e.g. ` ns`). Used for blank-cell alignment on
+    // stdev rows.
+    let adj_cell_w = adj_w + unit_len;
+    if show_adj {
+        let adj_gap = unit_len + ADJ_SEP.len() + adj_w;
+        println!(
+            "{:>first_col$}{:>last_gap$}{:>range_gap$}{:>count_gap$}{:>mean_gap$}{:>adj_gap$}",
+            "first", "last", "range", "count", "mean", "adj mean",
+        );
+    } else {
+        println!(
+            "{:>first_col$}{:>last_gap$}{:>range_gap$}{:>count_gap$}{:>mean_gap$}",
+            "first", "last", "range", "count", "mean",
+        );
+    }
+
+    for r in &rows {
+        if show_adj {
+            println!(
+                "{INDENT}{:<label_w$} {:>first_w$} {unit}{GAP}{:>last_w$} {unit}{GAP}{:>range_w$} {unit}{GAP}{:>count_w$}{GAP}{:>mean_w$} {unit}{ADJ_SEP}{:>adj_w$} {unit}",
+                r.label, r.first, r.last, r.range, r.count, r.mean, r.adj_mean,
+            );
+        } else {
+            println!(
+                "{INDENT}{:<label_w$} {:>first_w$} {unit}{GAP}{:>last_w$} {unit}{GAP}{:>range_w$} {unit}{GAP}{:>count_w$}{GAP}{:>mean_w$} {unit}",
+                r.label, r.first, r.last, r.range, r.count, r.mean,
+            );
+        }
+    }
+
+    let skip = first_w
+        + unit_len
+        + GAP.len()
+        + last_w
+        + unit_len
+        + GAP.len()
+        + range_w
+        + unit_len
+        + GAP.len()
+        + count_w;
+    if show_adj {
+        println!(
+            "{INDENT}{:<label_w$} {:>skip$}{GAP}{:>mean_w$} {unit}{ADJ_SEP}{:>adj_w$} {unit}",
+            "mean", "", hist_mean_str, hist_mean_adj_str,
+        );
+        println!(
+            "{INDENT}{:<label_w$} {:>skip$}{GAP}{:>mean_w$} {unit}{ADJ_SEP}{:>adj_cell_w$}",
+            "stdev", "", hist_stdev_str, "",
+        );
+    } else {
+        println!(
+            "{INDENT}{:<label_w$} {:>skip$}{GAP}{:>mean_w$} {unit}",
+            "mean", "", hist_mean_str,
         );
         println!(
             "{INDENT}{:<label_w$} {:>skip$}{GAP}{:>mean_w$} {unit}",
-            "stdev min-p99",
-            "",
-            fmt_commas_f64(conv_f(trim_stdev), 0),
+            "stdev", "", hist_stdev_str,
         );
+    }
+
+    if have_trim {
+        if show_adj {
+            println!(
+                "{INDENT}{:<label_w$} {:>skip$}{GAP}{:>mean_w$} {unit}{ADJ_SEP}{:>adj_w$} {unit}",
+                "mean min-p99", "", trim_mean_str, trim_mean_adj_str,
+            );
+            println!(
+                "{INDENT}{:<label_w$} {:>skip$}{GAP}{:>mean_w$} {unit}{ADJ_SEP}{:>adj_cell_w$}",
+                "stdev min-p99", "", trim_stdev_str, "",
+            );
+        } else {
+            println!(
+                "{INDENT}{:<label_w$} {:>skip$}{GAP}{:>mean_w$} {unit}",
+                "mean min-p99", "", trim_mean_str,
+            );
+            println!(
+                "{INDENT}{:<label_w$} {:>skip$}{GAP}{:>mean_w$} {unit}",
+                "stdev min-p99", "", trim_stdev_str,
+            );
+        }
     }
     println!();
 }

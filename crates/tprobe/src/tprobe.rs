@@ -25,9 +25,12 @@
 //!   histogram stores per-event cost.
 //! - [`TProbe::clear`] added — resets records and histogram,
 //!   used at the warmup→measurement boundary.
-//! - [`TProbe::report`] now takes an optional [`Overhead`]
-//!   and subtracts the per-event framing correction from each
-//!   stored value at drain time.
+//! - [`TProbe::report`] takes an optional [`Overhead`]. The
+//!   histogram stores **raw** per-event values; the overhead
+//!   correction is passed through to `band_table::render`
+//!   so it can display an `adj mean` column alongside the
+//!   raw columns. See `notes/overhead-model.md` for the
+//!   subtraction policy.
 
 use hdrhistogram::Histogram;
 
@@ -147,27 +150,36 @@ impl TProbe {
     /// Render a band-table report for this probe. `as_ticks`
     /// controls the display unit: `false` converts stored tick
     /// deltas to nanoseconds (default for the CLI); `true` shows
-    /// raw ticks (`-t`/`--ticks`). `overhead` (if `Some`)
-    /// subtracts per-event framing correction from each drained
-    /// record.
+    /// raw ticks (`-t`/`--ticks`).
     ///
     /// Drains any pending `start` / `end*` records into the
-    /// histogram before rendering:
-    /// `per_event = (end_tsc − start_tsc) / batch - overhead_correction`,
-    /// clamped to `1` since the histogram lower bound is 1.
+    /// histogram as **raw** per-event values:
+    /// `per_event_raw = (end_tsc − start_tsc) / batch`, clamped
+    /// to `1` since the histogram lower bound is 1. If
+    /// `overhead` is `Some`, the per-event correction is
+    /// averaged across drained records and passed to
+    /// `band_table::render`, which displays it in an `adj mean`
+    /// column alongside the raw columns. See
+    /// `notes/overhead-model.md`.
     pub fn report(&mut self, as_ticks: bool, overhead: Option<&Overhead>) {
+        let mut total_correction_ticks: u128 = 0;
+        let mut drained_count: u64 = 0;
         for r in self.records.drain(..) {
             let delta = r.end_tsc.saturating_sub(r.start_tsc);
             let batch = r.batch.max(1);
             let per_event_raw = (delta + batch / 2) / batch;
-            let per_event = if let Some(ovh) = overhead {
-                per_event_raw.saturating_sub(ovh.per_event_ticks(batch))
-            } else {
-                per_event_raw
-            };
-            self.hist.record(per_event.max(1)).unwrap(); // OK: histogram bounds are [1, 1e12]; per_event.max(1) ≥ 1, and per-event tick deltas stay well under 1e12
+            self.hist.record(per_event_raw.max(1)).unwrap(); // OK: histogram bounds are [1, 1e12]; per_event_raw.max(1) ≥ 1, and per-event tick deltas stay well under 1e12
+            if let Some(ovh) = overhead {
+                total_correction_ticks += ovh.per_event_ticks(batch) as u128;
+                drained_count += 1;
+            }
         }
-        band_table::render("tprobe", &self.name, &self.hist, as_ticks);
+        let correction = if drained_count > 0 {
+            Some((total_correction_ticks / drained_count as u128) as u64)
+        } else {
+            None
+        };
+        band_table::render("tprobe", &self.name, &self.hist, as_ticks, correction);
     }
 }
 
@@ -238,7 +250,7 @@ mod tests {
     }
 
     #[test]
-    fn report_subtracts_overhead() {
+    fn report_stores_raw_even_with_overhead() {
         use std::time::Duration;
         let mut p = TProbe::new("t");
         p.records.push(Record {
@@ -256,9 +268,10 @@ mod tests {
         };
         p.report(true, Some(&ovh));
         let v = p.hist.iter_recorded().next().unwrap().value_iterated_to();
-        // per_event_raw = (1000 + 5) / 10 = 100. Correction = 100/10 = 10.
-        // Adjusted = 100 - 10 = 90.
-        assert_eq!(v, 90);
+        // per_event_raw = (1000 + 5) / 10 = 100. Histogram stores
+        // raw regardless of overhead; correction is applied only
+        // in the `adj mean` column of the band-table report.
+        assert_eq!(v, 100);
     }
 
     #[test]

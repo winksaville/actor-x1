@@ -76,11 +76,10 @@ the two `rdtsc` reads". Keeping them in the measurement is
 honest — they are part of the real cost the measured code
 pays.
 
-## Subtraction policy
+## Correction policy
 
 `Overhead::per_event_ticks(batch)` returns the per-event
-correction `TProbe::report` subtracts from every stored
-value:
+correction:
 
 ```
 correction = framing_ticks / batch + loop_per_iter_ticks
@@ -91,38 +90,69 @@ correction = framing_ticks / batch + loop_per_iter_ticks
 At `batch = 1` the framing term is paid in full; at
 `batch = N` it is spread across `N` events and rounds
 toward zero as `N` grows. `loop_per_iter_ticks` is added
-back because the real measurement loop pays per-iter
-scaffolding (loop branch + counter increment) that the
-empty-bench fit captures. The sum is rounded to the
-nearest tick.
+because the real measurement loop pays per-iter scaffolding
+(loop branch + counter increment) that the empty-bench fit
+captures. The sum is rounded to the nearest tick.
 
 The bot thinks this matches "cost of the work alone" more
-closely than framing-only subtraction: the real loop's
-per-iter scaffolding is structural overhead relative to
-the dispatch work, and `black_box(1)`'s iter cost is a
-reasonable proxy. The tradeoff is a small downward bias —
-the real loop doesn't execute the `black_box(1)` itself,
-so the measured `loop_per_iter_ticks` is slightly larger
-than the real loop's scaffolding. The bot thinks the bias
-is on the order of a tick per event and is worth the
-simpler story in the output.
+closely than framing-only: the real loop's per-iter
+scaffolding is structural overhead relative to the dispatch
+work, and `black_box(1)`'s iter cost is a reasonable proxy.
+The tradeoff is a small downward bias — the real loop
+doesn't execute the `black_box(1)` itself, so the measured
+`loop_per_iter_ticks` is slightly larger than the real
+loop's scaffolding. The bot thinks the bias is on the order
+of a tick per event and is worth the simpler story in the
+output.
+
+### Where the correction is applied
+
+`TProbe`'s histogram stores **raw** per-event values
+unchanged — no in-place subtraction. The correction is
+averaged across drained records and passed to the
+band-table renderer, which displays it in a rightmost
+`adj mean` column alongside the raw columns. Each row's
+(and each mean summary row's) raw mean has the correction
+subtracted, clamped at 0, for display; the other columns
+(`first` / `last` / `range` / `count` / `mean`) show raw
+unchanged.
+
+`stdev` rows leave the `adj mean` column blank: standard
+deviation is shift-invariant, so subtracting a constant
+from every sample doesn't change it.
+
+The bot thinks raw-and-adjusted side-by-side is more
+honest than hiding raw behind a subtracted mean: readers
+see the physical per-event cost the probe actually
+measured plus a derived "cost of the work alone" column,
+and band placement + distribution shape are unaffected by
+the correction choice.
 
 ## Per-event correction when batches mix
 
-Today every record in a given probe drain carries the same
-`batch` (the runtime commits to one `inner` per run), so
-`correction` is a single constant across the drain. If a
-future probe ever mixes `batch` values within one drain —
-e.g. an actor whose scopes cover both fast-path singles
-(`batch = 1`, framing term paid in full) and slow-path
-batches (`batch = 1000`, framing term ≈ 0) — the correct
-overhead-adjusted mean per band requires per-record
-correction tracked per band, not a single global average.
-The bot thinks the change at that point is:
+`TProbe::report` averages the per-event correction across
+all drained records and passes a single constant to
+`band_table::render`. Every record in a given probe drain
+today carries the same `batch` (the runtime commits to one
+`inner` per run), so that global average *is* the
+per-record correction — exact.
+
+If a future probe ever mixes `batch` values within one
+drain — e.g. an actor whose scopes cover both fast-path
+singles (`batch = 1`, framing term paid in full) and
+slow-path batches (`batch = 1000`, framing term ≈ 0) —
+records with small batches carry large corrections and
+records with large batches carry tiny ones. If those
+records cluster by band (small-batch records in higher-
+value bands, say), a global average under-corrects some
+bands and over-corrects others. The bot thinks the fix at
+that point is:
 
 - drain loop accumulates `band_correction_sum[i]` alongside
   `band_sum[i]`,
 - `adj_mean[i] = (band_sum[i] - band_correction_sum[i]) /
   band_count[i]`.
 
-Deferred until that situation arises.
+Deferred until that situation arises. The `adj mean`
+column's accuracy in the mixed-batch case should be
+considered approximate until then.

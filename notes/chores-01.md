@@ -1124,6 +1124,122 @@ event (typically on the order of one tick).
   1 (the histogram lower bound). Only the correction value
   changes; the subtraction path is untouched.
 
+## Band-table raw columns + `adj mean` column (0.3.0-3)
+
+Changes `TProbe::report` to store **raw** per-event values
+in the histogram (no in-place subtraction) and adds a
+rightmost `adj mean` column to the band-table report where
+the correction is displayed. The existing columns
+(`first` / `last` / `range` / `count` / `mean`) now always
+show raw hardware-tick deltas divided by batch, untouched
+by overhead calibration. `adj mean` shows each row's raw
+mean minus the per-event correction (clamped at 0); the
+two `stdev` summary rows leave the adj column blank since
+standard deviation is shift-invariant.
+
+Splitting raw from adjusted makes the probe's measurement
+honest: readers see the physical per-event cost the probe
+actually observed, then a derived "cost of the work alone"
+value beside it, and can A/B either against other runs.
+Band placement and distribution shape are no longer
+shifted by the correction choice.
+
+- `crates/actor-x1/Cargo.toml`: `0.3.0-2` → `0.3.0-3`.
+- `crates/tprobe/Cargo.toml`: `0.1.1` → `0.1.2`. Behavior
+  of `TProbe::report` changes (histogram contents; band
+  table layout), so the tprobe crate bumps too.
+- `crates/tprobe/src/tprobe.rs`:
+  - `TProbe::report` stores `per_event_raw` in the
+    histogram without subtracting overhead. If an
+    `Overhead` is supplied, the per-event correction is
+    averaged across drained records and forwarded to
+    `band_table::render`. Docstring updated.
+  - Module docstring's divergence bullet revised:
+    "histogram stores raw, correction passed through to
+    render".
+  - Test `report_subtracts_overhead` renamed to
+    `report_stores_raw_even_with_overhead` with its
+    assertion flipped from 90 → 100 to reflect raw
+    storage. The other report tests stay as-is (they
+    didn't use overhead).
+- `crates/tprobe/src/band_table.rs`:
+  `render(kind, name, hist, as_ticks, correction: Option<u64>)`.
+  When `correction` is `Some`, the header gains an
+  `adj mean` column; band rows show raw + adj mean;
+  summary rows `mean` and `mean min-p99` show both; `stdev`
+  rows leave the adj cell blank. When `correction` is
+  `None`, the old layout (no adj column) is emitted —
+  preserves backward behavior if overhead is absent.
+  Column widths include the new adj column where relevant.
+- `crates/tprobe/notes/overhead-model.md`:
+  Subtraction-policy section renamed to Correction-policy
+  and rewritten to describe the raw+adj display pattern.
+  A new "Where the correction is applied" subsection
+  notes the histogram-stores-raw + band-table-displays-adj
+  split and the shift-invariance rationale for blank
+  stdev cells. The "Per-event correction when batches
+  mix" section updated to describe the global-average
+  approach today and flag the mixed-batch approximation.
+
+### Display example (inner=1000, this box)
+
+```
+  tprobe: goal1.dispatch [count=20,363]
+              first     last    range       count mean    adj mean
+    min-p1        0 ns     0 ns     0 ns        0    0 ns        0 ns
+    p1-p10        4 ns     4 ns     0 ns    3,726    4 ns        4 ns
+    p30-p40       5 ns     5 ns     0 ns    6,725    5 ns        4 ns
+    p70-p80       5 ns     5 ns     0 ns    9,240    5 ns        5 ns
+    p90-p99       5 ns     6 ns     1 ns      460    6 ns        5 ns
+    p99-max       6 ns    52 ns    46 ns      212    8 ns        8 ns
+    mean                                             5 ns        5 ns
+    stdev                                            0 ns
+    mean min-p99                                     5 ns        4 ns
+    stdev min-p99                                    0 ns
+```
+
+(Some bands omitted for brevity; the real output always
+renders all 12.) Correction at `inner=1000` is tiny
+(framing/1000 + loop_per_iter ≈ 1 tk / 0.26 ns), so most
+rows' `mean` and `adj mean` are identical. At `inner=1`
+the correction is much larger (framing paid in full), and
+the split is visible in ticks mode: `mean=38 tk, adj mean=16 tk`
+on the hot bucket.
+
+### Design decisions recorded here
+
+- **Global-average correction (approach (a), not per-band).**
+  At constant batch (today's PoC) the global average
+  equals the per-record correction exactly; at mixed
+  batches it's approximate. Tracked in
+  `overhead-model.md`'s "Per-event correction when batches
+  mix" section along with the per-band-sum extension that
+  would replace it.
+- **`stdev` rows leave adj blank, not zero.** Stdev is
+  shift-invariant, so adj-stdev would equal raw-stdev by
+  definition — printing a duplicate column is noise.
+  Blank cells communicate "not applicable here" better
+  than duplicated values. Alignment is preserved by
+  padding to the adj column's width with spaces.
+- **`correction: Option<u64>` threads through `render`.**
+  When overhead is `None` (today's `--raw` flag; removed in
+  `0.3.0-4`), no adj column renders — the old layout is
+  preserved. Avoids forcing the adj column to exist with
+  meaningless zeros in the no-overhead case.
+- **`mean_w` now includes summary-row widths.** Previously
+  `mean_w` was computed only from band-row `mean` strings;
+  summary `mean` / `mean min-p99` values could exceed this
+  (especially when a single hot band dominates the
+  histogram's mean). Collecting summary strings first,
+  then widening `mean_w` to include them, keeps alignment
+  consistent. Same for `adj_w` when `show_adj`.
+- **`ADJ_SEP = "        "` (8 spaces) before the adj column.**
+  A single `GAP` (4 spaces) between `mean` and `adj mean`
+  read cramped in the output — the adj column looked glued
+  to the raw columns, especially in the header. Doubling
+  the separator makes the raw-vs-derived distinction
+  visually obvious without widening every column.
+
 ## Future work: linkme/inventory benchmark harness
 
 Idea captured during `0.3.0-0`; not scheduled for
