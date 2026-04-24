@@ -51,29 +51,29 @@ Install with `cargo install --path crates/actor-x1`; both share
 a common CLI shape:
 
 ```
-$ goal1 0.5 --warmup 0 --inner 1000 --pin 0
-actor-x1 0.2.0
-goal1: 102087000 messages in 0.500s (204.174 M msg/s, inner=1000)
+$ goal1 0.5 -i 1000 -p 0
+actor-x1 0.3.0
+goal1: 101028000 messages in 0.500s (202.056 M msg/s, inner=1000)
   pinning: main → core 0
-  apparatus: framing=21 tk (5.54 ns); per-event at inner=1000 = 0 tk (0.00 ns)
+  apparatus: framing=21 tk (5.54 ns); loop_per_iter=0.93 tk (0.24 ns); per-event at inner=1000 = 1 tk (0.26 ns)
 
-  tprobe: goal1.dispatch [count=102,087]
-              first     last    range        count mean
-    min-p1        0 ns     0 ns     0 ns         0    0 ns
-    p1-p10        0 ns     0 ns     0 ns         0    0 ns
-    p10-p20       4 ns     4 ns     0 ns    32,684    4 ns
-    p20-p30       0 ns     0 ns     0 ns         0    0 ns
-    p30-p40       0 ns     0 ns     0 ns         0    0 ns
-    p40-p50       5 ns     5 ns     0 ns    30,128    5 ns
-    p50-p60       0 ns     0 ns     0 ns         0    0 ns
-    p60-p70       0 ns     0 ns     0 ns         0    0 ns
-    p70-p80       5 ns     5 ns     0 ns    34,218    5 ns
-    p80-p90       0 ns     0 ns     0 ns         0    0 ns
-    p90-p99       5 ns     7 ns     2 ns     3,971    6 ns
-    p99-max       7 ns    34 ns    27 ns     1,086    9 ns
-    mean                                              5 ns
+  tprobe: goal1.dispatch [count=101,028]
+              first     last    range        count mean    adj mean
+    min-p1        0 ns     0 ns     0 ns         0    0 ns        0 ns
+    p1-p10        4 ns     4 ns     0 ns    18,076    4 ns        4 ns
+    p10-p20       0 ns     0 ns     0 ns         0    0 ns        0 ns
+    p20-p30       0 ns     0 ns     0 ns         0    0 ns        0 ns
+    p30-p40       5 ns     5 ns     0 ns    32,633    5 ns        4 ns
+    p40-p50       0 ns     0 ns     0 ns         0    0 ns        0 ns
+    p50-p60       0 ns     0 ns     0 ns         0    0 ns        0 ns
+    p60-p70       0 ns     0 ns     0 ns         0    0 ns        0 ns
+    p70-p80       5 ns     5 ns     0 ns    43,603    5 ns        5 ns
+    p80-p90       0 ns     0 ns     0 ns         0    0 ns        0 ns
+    p90-p99       5 ns     7 ns     2 ns     5,644    6 ns        6 ns
+    p99-max       7 ns    54 ns    47 ns     1,072    9 ns        9 ns
+    mean                                              5 ns        5 ns
     stdev                                             1 ns
-    mean min-p99                                      5 ns
+    mean min-p99                                      5 ns        5 ns
     stdev min-p99                                     0 ns
 ```
 
@@ -103,13 +103,13 @@ goal1: 102087000 messages in 0.500s (204.174 M msg/s, inner=1000)
 
 ```
 # Short iterative smoke, no warmup:
-goal1 0.1 --warmup 0 --inner 1000
+goal1 0.1 -w 0 -i 1000
 
 # Full measurement with pinning:
-goal1 2 --inner 1000 --pin 0
+goal1 2 -i 1000 -p 0
 
 # Goal2 with actors on separate cores (same complex):
-goal2 1 --pin 0,1
+goal2 1 -p 0,1
 ```
 
 ## Reading the band table
@@ -143,16 +143,26 @@ distribution falls within that percentile range.
 - **last** — highest value observed in the band.
 - **range** — `last - first + 1`; width of the band's value range.
 - **count** — number of samples in the band.
-- **mean** — average value within the band.
+- **mean** — average value within the band. Raw, unadjusted —
+  same hardware-tick deltas the probe recorded.
+- **adj mean** — same mean, minus the per-event apparatus
+  correction from calibration (clamped at 0). See the
+  `apparatus:` line for the correction amount and
+  [`crates/tprobe/notes/overhead-model.md`](crates/tprobe/notes/overhead-model.md)
+  for the formal model.
 
 ### Summary rows
 
 - **mean / stdev** — whole-histogram statistics, including the
-  `p99-max` tail.
+  `p99-max` tail. `adj mean` on the `mean` row applies the
+  per-event correction the same way as the band rows; `stdev`
+  leaves the `adj mean` column blank because standard deviation
+  is shift-invariant.
 - **mean min-p99 / stdev min-p99** — same statistics excluding
   `p99-max`. Useful for A/B-ing code changes because the tail can
   be dominated by rare outliers (OS preemption, lock contention,
   interrupts) that drown signal in the body of the distribution.
+  Same raw-vs-adj treatment as the `mean` / `stdev` pair.
 
 ### Why a band can be all zeros
 
@@ -169,16 +179,27 @@ distribution is spike-heavy.
 ### The `apparatus:` line
 
 ```
-apparatus: framing=21 tk (5.54 ns); per-event at inner=1000 = 0 tk (0.00 ns)
+apparatus: framing=21 tk (5.54 ns); loop_per_iter=0.93 tk (0.24 ns); per-event at inner=1000 = 1 tk (0.26 ns)
 ```
 
-Reports the fitted overhead model. `framing` is the hardware
-floor cost of the probe's two-`rdtsc` pair, measured by a
-two-point fit on empty `black_box(1)` scopes. `per-event at
-inner=N` is what the report subtracts from each stored value —
-`framing / N`, which amortizes toward zero as `inner` grows.
-Under `--raw` this line reads `raw (no overhead subtraction)`
-and calibration is skipped.
+Reports the fitted overhead model from calibration.
+
+- **`framing`** — hardware floor cost of the probe's two-`rdtsc`
+  pair, paid once per scope. Measured as the intercept of a
+  two-point fit on empty `black_box(1)` scopes.
+- **`loop_per_iter`** — per-iteration cost of the calibration's
+  empty inner loop (one `black_box(1)` per iter). Measured as
+  the slope of the same fit.
+- **`per-event at inner=N`** — the per-event correction shown in
+  the band-table's `adj mean` column: `framing / N +
+  loop_per_iter`, rounded to the nearest tick. Amortizes toward
+  `loop_per_iter` as `inner` grows.
+
+Calibration runs unconditionally (~10 ms wall-clock); the
+histogram still stores raw per-event values, and this correction
+is applied only in the `adj mean` display column. See
+[`crates/tprobe/notes/overhead-model.md`](crates/tprobe/notes/overhead-model.md)
+for the derivation and the unmeasurable-overhead category.
 
 ### The `pinning:` line
 
@@ -197,18 +218,20 @@ best read of why the numbers look the way they do. Specific
 numbers below are from an AMD Ryzen 3900X at ~3.7 GHz — compare
 your own numbers to your own baseline, not to these.
 
-### goal1 `--inner 1` shows ~9 ns; `--inner 1000` shows ~5 ns
+### goal1 raw vs `adj mean`, and how `inner` changes it
 
-The probe's two-`rdtsc` framing has a real cost (~4 ns on modern
-x86) that contaminates every stored scope delta. At `inner=1`
-the full framing lands on every sample, pushing the reported
-per-event cost to ~9 ns; at `inner=1000` framing is amortized
-(~0.004 ns per event), so the stored value converges on the
-actual `handle_message` cost of ~5 ns. `--raw` makes this
-concrete — `--raw --inner 1` reads ~9 ns, `--raw --inner 1000`
-reads ~5 ns. Default overhead calibration subtracts the framing,
-so adjusted `--inner 1` also lands at ~5 ns, matching
-`--inner 1000`.
+The probe's two-`rdtsc` framing has a real cost (~5 ns on modern
+x86) that contaminates every stored scope delta — the histogram
+stores this raw value, so the `mean` column shows it. At
+`inner=1` the full framing lands on every per-event sample,
+pushing `mean` to ~10 ns; the `adj mean` column applies the
+`framing + loop_per_iter` correction and reports ~4 ns —
+approximately the true `handle_message` cost. At `inner=1000`
+framing is amortized to ~0.02 ns per event, so `mean` and
+`adj mean` both land at ~5 ns (they agree because the correction
+is tiny at this batch size). The two regimes converge on the
+same work-alone cost, just via different paths: low `inner`
+relies on the correction, high `inner` shows it directly.
 
 ### goal2 is ~900× slower than goal1 `--inner 1000`
 
@@ -268,7 +291,8 @@ right comparator for A/B work.
 
 If the numbers on your box differ from those above, that's
 expected; consistency run-to-run and sensitivity to
-`--pin` / `--inner` / `--raw` are the invariants worth trusting.
+`--pin` / `--inner` / `--warmup` are the invariants worth
+trusting.
 
 ## jj Tips for Git Users
 

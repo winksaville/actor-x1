@@ -5,8 +5,6 @@ and reference links to more details.
 
 ## In Progress
 
-- Lower `--warmup` default 10 s → 0.5 s (0.3.0-5) [[14]]
-
 ## Todo
 
 See [Foramt details](README.md#todo-format)
@@ -85,6 +83,8 @@ and older `## Done` sections are moved to [done.md](done.md) to keep this file s
 - Extend subtraction to framing + loop_per_iter (0.3.0-2) [[11]]
 - Band-table raw columns + `adj mean` column (0.3.0-3) [[12]]
 - Remove `--raw` flag, always calibrate (0.3.0-4) [[13]]
+- Lower `--warmup` default 10 s → 0.5 s (0.3.0-5) [[14]]
+- Band-table format + overhead docs (0.3.0) [[15]]
 
 
 # References
@@ -103,3 +103,4 @@ and older `## Done` sections are moved to [done.md](done.md) to keep this file s
 [12]: chores-01.md#band-table-raw-columns--adj-mean-column-030-3
 [13]: chores-01.md#remove---raw-flag-always-calibrate-030-4
 [14]: chores-01.md#lower---warmup-default-10-s--05-s-030-5
+[15]: chores-01.md#band-table-format--overhead-docs-030

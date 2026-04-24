@@ -1395,6 +1395,122 @@ assumes (see `crates/tprobe/notes/overhead-model.md`
   we'd added them at any other point it would have been
   spurious churn to `Cli` alone.
 
+## Band-table format + overhead docs (0.3.0)
+
+Closes the `0.3.0` ladder. The `-N` suffix drops; the probe
+now renders raw + `adj mean` side-by-side, the overhead
+vocabulary has a formal written definition, each crate
+carries its own `notes/`/`README.md`/`LICENSE-*`, `--raw`
+and the redundant `CAL_WARMUP` loop are gone, calibration
+is unconditional, the `--warmup` default dropped from
+10 s → 0.5 s, and the common CLI flags gained short-form
+aliases. No behavior change vs `0.3.0-5`; this is the
+closing marker plus the README refresh.
+
+- `crates/actor-x1/Cargo.toml`: `0.3.0-5` → `0.3.0`.
+- `README.md`: sample-output block regenerated from a
+  fresh `goal1 0.5 -i 1000 -p 0` run under `0.3.0` — new
+  version banner, new apparatus line (now includes
+  `loop_per_iter`), new band-table layout with the
+  `adj mean` column and `ADJ_SEP`-spaced alignment.
+  `### Columns` gains an `adj mean` bullet describing the
+  raw-vs-adjusted split; `### Summary rows` notes that
+  `adj mean` applies on `mean` / `mean min-p99` and stays
+  blank on `stdev` / `stdev min-p99` (shift-invariant).
+  `### The apparatus: line` rewritten around the new
+  three-component format (`framing`, `loop_per_iter`,
+  `per-event at inner=N`), pointing at
+  `crates/tprobe/notes/overhead-model.md`. `Typical
+  invocations` updated to use the new short aliases
+  (`-w`, `-i`, `-p`). The `The bot's understanding` entry
+  for `goal1 --inner 1 shows ~9 ns; --inner 1000 shows
+  ~5 ns` rewritten around the raw-vs-`adj mean` story.
+  Trailing reference to `--raw` in the "Numbers travel
+  with the hardware" section → `--warmup`.
+- `notes/todo.md`: `0.3.0-5` entry moves from
+  `## In Progress` to `## Done`; a new overall entry
+  `Band-table format + overhead docs (0.3.0) [[15]]` is
+  added to `## Done` pointing at this closing section
+  (same pattern Stage 1 / 0.2.0 used).
+- `notes/chores-01.md`: this section.
+
+### The 0.3.0 ladder at a glance
+
+| Version     | Landmark                                                  |
+|---          |---                                                        |
+| `0.3.0-0`   | Plan marker + linkme/inventory future-work note           |
+| `0.3.0-1`   | Per-crate `notes/` + `README.md` + `LICENSE-*`; `overhead-model.md` written |
+| `0.3.0-2`   | `Overhead::per_event_ticks` extended to framing + loop_per_iter; apparatus line shows both |
+| `0.3.0-3`   | `TProbe::report` stores raw; band-table gains `adj mean` column |
+| `0.3.0-4`   | `--raw` flag removed; `CAL_WARMUP` loop removed; `calibrate()` documents caller-warmup contract |
+| `0.3.0-5`   | `--warmup` default 10 s → 0.5 s; `-w/-i/-p` short aliases |
+| **`0.3.0`** | **Closing marker**                                        |
+
+### What ships in 0.3.0
+
+- Band-table report with raw hardware-tick columns on the
+  left (`first` / `last` / `range` / `count` / `mean`) plus
+  a rightmost `adj mean` column showing the
+  apparatus-corrected value. `stdev` rows leave the `adj`
+  column blank (shift-invariant). 8-space separator between
+  `mean` and `adj mean` so the raw-vs-derived distinction
+  is visually obvious.
+- Overhead subtraction model extended beyond framing to
+  include `loop_per_iter_ticks` (amortized across `batch`).
+  Correction is averaged across drained records and passed
+  to the renderer — histogram stores raw values unchanged.
+- `tprobe` at `0.1.3` — standalone crate providing
+  `TProbe` / `TProbeRecId`, `Overhead` / `calibrate`, and
+  the `band_table` / `fmt` / `pin` / `ticks` submodules.
+  Calibration assumes a caller-warmed CPU; documented in
+  `crates/tprobe/notes/overhead-model.md`'s new
+  "Calibration preconditions" subsection.
+- Per-crate `notes/` and `README.md` and `LICENSE-*`
+  copies, so each crate is self-contained if/when it
+  splits into its own repo. Workspace `notes/` retains
+  format conventions, VCS tips, the chores file, and the
+  workspace-level todo/done index.
+- Simplified CLI: `--raw` flag removed (calibration is
+  always on, ~10 ms), `--warmup` default dropped 10 s →
+  0.5 s for quick iteration, and `-w/-i/-p` short aliases
+  now match the pre-existing `-t/--ticks` pattern.
+- `crates/tprobe/notes/overhead-model.md` formalizes the
+  overhead vocabulary: framing, `loop_per_iter`, and the
+  unmeasurable "everything else" category (cache misses,
+  branch mispredicts, context switches, interrupts) that
+  stays in the measurement because it cannot be
+  attributed per-event.
+- 23 unit tests (5 in actor-x1's runtime module, 18 in
+  `tprobe`). `tprobe`'s test count grew by one —
+  `per_event_ticks_adds_loop_per_iter` was added at
+  `0.3.0-2`. `report_subtracts_overhead` was renamed to
+  `report_stores_raw_even_with_overhead` at `0.3.0-3` and
+  its assertion flipped from 90 → 100.
+
+### What's next
+
+Three classes of follow-up tracked in `notes/todo.md`:
+
+1. **Correctness/ergonomic items from this ladder:**
+   revisit the band-table `range` formula (drop the `+1`);
+   clean up `SingleThreadRuntime::run_for`'s redundant
+   `Self` destructure and switch its inner `while` to a
+   `for` loop.
+2. **`tprobe` memory/benchmark work:** bound the
+   records-buffer memory (the pre-existing
+   unbounded-`Vec` issue that shows up on long runs —
+   options `(a)`–`(d)` itemized in `notes/todo.md`); add
+   a `tprobe::warmup::cpu_boost` helper once a benchmark
+   harness needs it; build a `criterion` benchmark
+   mirroring goal1/goal2 so the probe's numbers can be
+   cross-validated; explore `linkme` / `inventory` for a
+   self-registering benchmark runner on top of `tprobe`.
+3. **Stage 2:** the larger design step — three actors
+   with a richer `Message { src_id, dst_id, send_count }`,
+   per-actor constructors, and names. See
+   [`crates/actor-x1/notes/design.md`](../crates/actor-x1/notes/design.md)
+   "Stage2 runtime" section.
+
 ## Future work: linkme/inventory benchmark harness
 
 Idea captured during `0.3.0-0`; not scheduled for
