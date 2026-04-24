@@ -64,6 +64,26 @@ because Y caches better"), a cause ("the drift was due to thermal
 state"), a prediction ("this should scale linearly"), or any
 reasoning not directly supported by the data on hand.
 
+## Notes writing style: prefer sub-bullets
+
+Durable text the bot writes — `notes/chores-*.md`, `notes/todo.md`,
+committed READMEs, design notes — should itemize with sub-bullets
+rather than run as large prose paragraphs. Short intro sentences
+(1–3) at the top of a section are fine; detail goes into
+hierarchical bullet lists.
+
+**Why:** easier to scan and cross-reference during review;
+matches how the user reads and edits committed reference
+material. A wall of prose hides structure that a nested list
+makes visible.
+
+**How to apply:** default to bullet structure for any non-trivial
+section. Reserve paragraphs for brief intros and occasional
+contextual framing. If a paragraph runs past ~3 sentences, look
+for the implicit list inside it and break it out. Design-decision
+entries in particular benefit — the *reason* / *what-was-rejected*
+/ *how-it-applies* decomposition reads naturally as sub-bullets.
+
 ## Committing
 
 Use `-R` (`--repository`) at the end to target the correct repo. Use

@@ -5,6 +5,8 @@ and reference links to more details.
 
 ## In Progress
 
+- goalzc + RuntimeZC: pooled zerocopy ping-pong (0.5.0) [[20]]
+
 ## Todo
 
 See [Foramt details](README.md#todo-format)
@@ -115,3 +117,4 @@ and older `## Done` sections are moved to [done.md](done.md) to keep this file s
 [17]: chores-01.md#comma-format-summary-counts-032
 [18]: ../crates/tprobe/notes/precision.md
 [19]: chores-01.md#criterion-benchmarks-for-goal1goal2-040
+[20]: chores-01.md#goalzc--runtimezc-pooled-zerocopy-ping-pong--plan-marker-050-0

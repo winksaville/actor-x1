@@ -1776,6 +1776,93 @@ Spot check during development, unpinned on the dev box:
 `goal2` reported 228 K msg/s; `goal2-crit` reported
 ~240 K msg/s. Within the expected range.
 
+## goalzc + RuntimeZC: pooled zerocopy ping-pong — plan marker (0.5.0-0)
+
+Adds a multi-threaded ping-pong workload whose messages are
+pool-backed byte buffers, rather than the unit `Message` that
+goal1 / goal2 exchange. Actors handle `&[u8]`; callers can
+cast inside their handlers via the `zerocopy` crate if they
+want typed views. A companion `goalzc-crit` criterion bench
+measures exactly the same work, probe-free.
+
+### Shape
+
+- `Pool` + `PooledMsg` — new `crates/actor-x1/src/pool.rs`.
+  - Buffers are fixed-size (`MAX_SIZE`) `Vec<u8>` owned by `PooledMsg`.
+  - `PooledMsg::Drop` returns the buffer to an `Arc<PoolInner>` shared across actor threads.
+  - Inner storage: `Mutex<Vec<Vec<u8>>>` — simple, some contention, upgradeable to lock-free later.
+  - `Deref<Target=[u8]>` so the handler's `&[u8]` is just `&*pooled`.
+  - Lazy allocation: pool starts empty; grows to steady-state (2 buffers for ping-pong) on demand.
+- `ActorZC` + `ContextZC` — new `crates/actor-x1/src/runtime_zc.rs`.
+  - `trait ActorZC { fn handle_message(&mut self, ctx: &mut dyn ContextZC, msg: &[u8]); }`
+  - `trait ContextZC { fn get_msg(&mut self, size: usize) -> PooledMsg; fn send(&mut self, dst_id: u32, msg: PooledMsg); }`
+- `RuntimeZC` — same file.
+  - 1:1 thread-per-actor, mirroring `MultiThreadRuntime`.
+  - Channel payload is `Signal::User(PooledMsg)`.
+  - Two entry points:
+    - `run(warmup, measurement, pins) -> Vec<(u64, TProbe)>` — tprobe-instrumented; for `goalzc`.
+    - `run_no_probe(warmup, measurement, pins) -> Vec<u64>` — probe-free; for `goalzc-crit`.
+- `goalzc` binary — new `crates/actor-x1/src/bin/goalzc.rs`.
+  - CLI mirrors `goal2`'s (`duration_s`, `--warmup`, `--ticks`, `--decimals`, `--pin`).
+  - Adds `--size N` — message byte size; default 64; validated `1..=MAX_SIZE`.
+  - Prints throughput + tprobe band-table per actor.
+- `goalzc-crit` bench — new `crates/actor-x1/benches/goalzc-crit.rs`.
+  - Criterion `iter_custom` over `RuntimeZC::run_no_probe`.
+  - Reuses the `measurement * iters / total_count` scaling trick from `goal2-crit`.
+  - `Throughput::Elements(1)`.
+
+### Multi-step ladder
+
+- `0.5.0-0` — Plan marker.
+  - Bump `actor-x1` to `0.5.0-0`.
+  - This chores section.
+  - `notes/todo.md` entry under `## In Progress`.
+  - `CLAUDE.md`: add "Notes writing style: prefer sub-bullets" section (captures in-session feedback).
+  - No code change.
+- `0.5.0-1` — `pool.rs`: `Pool` + `PooledMsg` with `Drop` return path.
+  - Unit tests: round-trip, drop-returns, size enforcement.
+- `0.5.0-2` — `runtime_zc.rs`: `ActorZC` / `ContextZC` + `RuntimeZC` with both `run` and `run_no_probe`.
+  - Unit tests: ping-pong handling, clean shutdown, pool drain on exit.
+- `0.5.0-3` — `bin/goalzc.rs`.
+  - Install + smoke-run.
+- `0.5.0-4` — `benches/goalzc-crit.rs`.
+  - `cargo bench` + spot-check throughput matches `goalzc`'s.
+- `0.5.0` — Closing marker.
+  - Drop `-N` suffix.
+  - Update `crates/actor-x1/README.md` Binaries + Benches.
+  - Move `notes/todo.md` entries to `## Done`.
+
+### Design decisions recorded here
+
+- Handler takes `&[u8]`; runtime owns the `PooledMsg`.
+  - Runtime receives `Signal::User(PooledMsg)` off the channel.
+  - Hands the handler `&*pooled` for the duration of `handle_message`.
+  - Drops the `PooledMsg` after the handler returns; buffer goes back to the pool.
+  - Pool traffic is one `get` + one `put` per dispatched message — exactly the cost goalzc exists to measure against goal2's unit-`Message` baseline.
+  - Passing `PooledMsg` by value into the handler would let a clever actor reuse the incoming buffer (avoiding pool churn).
+    - Rejected: `&[u8]` matches the shape of real zerocopy receivers and is the cleaner cross-validation target.
+- Fixed-size buffers (`MAX_SIZE`) for the MVP.
+  - Simpler pool (`Vec<Vec<u8>>`).
+  - Matches a ping-pong workload where every message is the same size.
+  - Size-classed sub-pools are future work; mentioned here explicitly so the extension isn't lost.
+- Lazy pool allocation.
+  - Pool starts empty; `get_msg` allocates a fresh `Vec<u8>` if the free list is empty.
+  - Steady state settles to 2 buffers for ping-pong after the first couple of dispatches.
+  - Pre-populating a fixed capacity is a micro-optimization that distorts first-dispatch latency (already dropped by warmup); deferred.
+- `--size N` CLI flag, not a compile-time const.
+  - goalzc is a benchmark; size sensitivity is exactly what a reader wants to sweep.
+  - `N` is validated against `MAX_SIZE` at startup.
+  - If `N > MAX_SIZE`, the binary errors cleanly rather than silently truncating.
+- `RuntimeZC` is a parallel runtime, not a replacement.
+  - `MultiThreadRuntime` stays untouched — existing `goal2` / `goal2-crit` keep working.
+  - `RuntimeZC` lives in its own module; no shared code with `MultiThreadRuntime`.
+  - Duplication is the price for a clean split that's easy to revisit once the shape stabilizes.
+  - The goal2-crit probe-contamination bug stays un-patched in `MultiThreadRuntime` for now; `run_no_probe` exists here from the start instead.
+- Multi-step `0.5.0` ladder.
+  - Five natural checkpoints: pool, runtime, bin, bench, close.
+  - Each reviewable on its own.
+  - A single-step `0.5.0` would be a large diff to review in one pass.
+
 ## Future work: linkme/inventory benchmark harness
 
 Idea captured during `0.3.0-0`; not scheduled for
