@@ -1650,6 +1650,23 @@ report's existing comma formatting for `count=N` and band
   application change plus a one-line `lib.rs` re-export.
   No `-N` ladder.
 
+## Measurement precision and repeatability
+
+Methodology note added at
+[`crates/tprobe/notes/precision.md`](../crates/tprobe/notes/precision.md).
+Captures the precision floors a `tprobe` measurement is
+bound by (hardware tick, apparatus framing noise, OoO
+`rdtsc` coalescing, hdrhistogram bucket width, unmeasurable
+systemic noise), the shell-loop technique for measuring
+run-to-run repeatability, expected-scale heuristics on this
+3900X box, and a `--repeat N` future-work proposal for
+building the repeatability measurement into the binaries.
+
+Placed in `crates/tprobe/notes/` rather than inline here
+because the content is tprobe-specific reference material —
+it travels with the crate if tprobe splits into its own
+repo later. Tracked as future work via todo `[18]`.
+
 ## Future work: linkme/inventory benchmark harness
 
 Idea captured during `0.3.0-0`; not scheduled for

@@ -24,6 +24,13 @@ See [Foramt details](README.md#todo-format)
   the CPU itself. Harnesses that call `calibrate()` directly
   (without an app-level dispatch loop) need to prime the CPU to
   boost frequency first
+- Add `--repeat N` flag to goal1/goal2 to run the full
+  warmup+measurement sequence N times and report cross-run mean
+  and stdev on `mean min-p99` / `adj mean min-p99`. Built-in
+  replacement for the `for _ in 1..=30; do goal1 2 ...` shell
+  loop; gives the empirical repeatability number A/B work
+  depends on. See [[18]] for floors, technique, and
+  expected-scale heuristics
 - Revisit band-table `range` semantics — drop the `+1` so
   `first == last → range = 0` (true "no spread" instead of
   today's "1 tk / rounds to 0 ns"). `last - first` reads
@@ -108,3 +115,4 @@ and older `## Done` sections are moved to [done.md](done.md) to keep this file s
 [15]: chores-01.md#band-table-format--overhead-docs-030
 [16]: chores-01.md#band-table-decimals-default--d-override-031
 [17]: chores-01.md#comma-format-summary-counts-032
+[18]: ../crates/tprobe/notes/precision.md
