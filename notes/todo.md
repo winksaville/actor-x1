@@ -14,11 +14,6 @@ See [Foramt details](README.md#todo-format)
 - Explore `linkme` / `inventory` for a benchmark harness on top of
   `tprobe` — self-registering benchmarks (no `main()` edits per
   benchmark); possibly reusable for actor registration too [[9]]
-- After 0.3.0: add a `criterion` benchmark mirroring the goal1 /
-  goal2 workloads, so `tprobe`'s numbers can be cross-validated
-  against an established statistical-sampling harness. Effort
-  estimate, breakdown, and open design questions captured
-  at [[19]]
 - When a benchmark harness lands (criterion and/or the
   linkme/inventory idea at `[9]`), add a CPU-warmup helper to
   `tprobe` — probably `tprobe::warmup::cpu_boost(iterations)` or
@@ -96,6 +91,7 @@ and older `## Done` sections are moved to [done.md](done.md) to keep this file s
 - Band-table format + overhead docs (0.3.0) [[15]]
 - Band-table decimals: default + `-d` override (0.3.1) [[16]]
 - Comma-format summary counts (0.3.2) [[17]]
+- Criterion benchmarks for goal1/goal2 (0.4.0) [[19]]
 
 
 # References
@@ -118,4 +114,4 @@ and older `## Done` sections are moved to [done.md](done.md) to keep this file s
 [16]: chores-01.md#band-table-decimals-default--d-override-031
 [17]: chores-01.md#comma-format-summary-counts-032
 [18]: ../crates/tprobe/notes/precision.md
-[19]: chores-01.md#future-work-criterion-benchmarks-for-goal1--goal2
+[19]: chores-01.md#criterion-benchmarks-for-goal1goal2-040

@@ -97,6 +97,33 @@ impl SingleThreadRuntime {
         count
     }
 
+    /// Dispatch up to `inner` consecutive messages with no
+    /// deadline check and no probe involvement. Intended for
+    /// benchmark harnesses (e.g. `criterion`) that invoke a
+    /// fixed-size unit of work repeatedly and time it externally,
+    /// so the per-scope [`TProbe`] bookkeeping would only add
+    /// noise.
+    ///
+    /// Returns the number of messages actually dispatched; a
+    /// value less than `inner` means the queue emptied
+    /// mid-batch. Workloads like ping-pong (one reply per
+    /// message) keep at least one message in flight, so in
+    /// steady state this returns exactly `inner`.
+    pub fn dispatch_batch(&mut self, inner: u64) -> u64 {
+        let Self { actors, queue, .. } = self;
+        let mut done: u64 = 0;
+        while done < inner {
+            let Some((dst, msg)) = queue.pop_front() else {
+                break;
+            };
+            let actor = &mut actors[dst as usize];
+            let mut ctx = SingleCtx { queue };
+            actor.handle_message(&mut ctx, msg);
+            done += 1;
+        }
+        done
+    }
+
     /// Mutable access to the embedded probe — used by callers to
     /// invoke [`TProbe::clear`] at the warmup → measurement
     /// boundary and [`TProbe::report`] after [`Self::run_for`]
@@ -182,6 +209,50 @@ mod tests {
         assert_eq!(rt.add_actor(Box::new(Sink)), 0);
         assert_eq!(rt.add_actor(Box::new(Sink)), 1);
         assert_eq!(rt.add_actor(Box::new(Sink)), 2);
+    }
+
+    #[test]
+    fn dispatch_batch_returns_full_count_in_steady_state() {
+        // Unbounded ping-pong: seed once, every dispatch refills
+        // the queue. dispatch_batch(N) should return N.
+        struct PingPong {
+            peer: u32,
+        }
+        impl Actor for PingPong {
+            fn handle_message(&mut self, ctx: &mut dyn Context, _: Message) {
+                ctx.send(self.peer, Message);
+            }
+        }
+        let mut rt = SingleThreadRuntime::new("test.dispatch_batch");
+        rt.add_actor(Box::new(PingPong { peer: 1 }));
+        rt.add_actor(Box::new(PingPong { peer: 0 }));
+        rt.seed(0, Message);
+        assert_eq!(rt.dispatch_batch(100), 100);
+        assert_eq!(rt.dispatch_batch(1), 1);
+    }
+
+    #[test]
+    fn dispatch_batch_returns_partial_on_drain() {
+        // Bouncer with max=3: seed (1) + 3 replies = 4 dispatches
+        // total. dispatch_batch(10) returns 4, then 0.
+        let mut rt = SingleThreadRuntime::new("test.dispatch_batch_partial");
+        rt.add_actor(Box::new(Bouncer {
+            peer: 1,
+            sent: 0,
+            max: 3,
+        }));
+        rt.add_actor(Box::new(Bouncer {
+            peer: 0,
+            sent: 0,
+            max: 3,
+        }));
+        rt.seed(0, Message);
+        let first = rt.dispatch_batch(10);
+        assert!(
+            (1..=7).contains(&first),
+            "expected a small partial, got {first}"
+        );
+        assert_eq!(rt.dispatch_batch(10), 0);
     }
 
     #[test]

@@ -1667,77 +1667,114 @@ because the content is tprobe-specific reference material —
 it travels with the crate if tprobe splits into its own
 repo later. Tracked as future work via todo `[18]`.
 
-## Future work: criterion benchmarks for goal1 / goal2
+## Criterion benchmarks for goal1/goal2 (0.4.0)
 
-Effort estimate and design sketch captured for picking up
-later. The bot thinks ~3–5 focused hours of work; single-step
-`0.4.0` is probably the right shape, though a multi-step
-ladder also fits if you want each piece reviewable on its
-own.
+Adds `goal1-crit` and `goal2-crit` criterion benches under
+`crates/actor-x1/benches/` that drive the same ping-pong
+workloads as the `goal1` and `goal2` binaries, so criterion's
+statistical sampling can cross-validate `tprobe`'s
+tick-histogram numbers. Invoked from `crates/actor-x1/` as
+`cargo bench --bench goal1-crit` and
+`cargo bench --bench goal2-crit`.
 
-### Breakdown
+- `crates/actor-x1/Cargo.toml`: `0.3.2` → `0.4.0`; adds
+  `criterion = "0.5"` to `[dev-dependencies]` and a
+  `[[bench]]` entry per bench (`harness = false`).
+- `crates/actor-x1/src/runtime.rs`: new
+  `SingleThreadRuntime::dispatch_batch(inner: u64) -> u64`
+  — one batched dispatch with no deadline check and no
+  probe involvement, suitable for `b.iter` closures.
+  Returns the number of messages actually dispatched
+  (equals `inner` in steady-state ping-pong; less if the
+  queue drains mid-batch). Two new unit tests:
+  steady-state full count, and partial-on-drain.
+- `crates/actor-x1/benches/goal1-crit.rs`: new file.
+  Parameterized sweep over `inner ∈ {1, 100, 1000}` via
+  `BenchmarkId::from_parameter`; each iteration calls
+  `rt.dispatch_batch(inner)` on a long-lived runtime.
+  `Throughput::Elements(inner)` so criterion's summary
+  reads as msgs / s.
+- `crates/actor-x1/benches/goal2-crit.rs`: new file. Uses
+  `iter_custom` — each call spins up a fresh
+  `MultiThreadRuntime`, runs a 50 ms warmup + 100 ms
+  measurement window, counts handled messages, and
+  returns a duration scaled to
+  `measurement * iters / total_count` so criterion's
+  per-iter estimate reads as per-message time.
+  `Throughput::Elements(1)`; `sample_size(50)` and
+  `measurement_time(10 s)` cap the bench at ~8 s of
+  sampling.
+- `crates/actor-x1/README.md`: new `## Benches` section
+  pointing at `cargo bench --bench goalN-crit`.
+- `notes/todo.md`: criterion-benchmark todo moves from
+  `## Todo` to `## Done`; ref [19] repointed from the
+  removed Future-work section to this one.
 
-| Step                          | Effort    | Why                                                                                                                                                                                                       |
-|---                            |---        |---                                                                                                                                                                                                        |
-| Wire criterion as dev-dep     | 5 min     | `[dev-dependencies]` entry + `[[bench]]` in `crates/actor-x1/Cargo.toml`, `harness = false`.                                                                                                              |
-| Expose a benchmarkable API    | 30–60 min | Add `SingleThreadRuntime::dispatch_batch(inner) -> u64` (one batch, no deadline check). `run_for` with a duration doesn't fit criterion's "call this closure repeatedly" shape.                           |
-| goal1 bench                   | 30 min    | `benches/goal1.rs`: set up runtime once, seed, loop `b.iter(\|\| rt.dispatch_batch(1000))`.                                                                                                               |
-| goal2 bench                   | 45–60 min | Trickier — criterion's default `b.iter` would spin threads per-iteration (setup cost dominates). Use `iter_custom` to keep threads alive and measure one ping-pong round-trip as the iteration.           |
-| Cross-validation narrative    | 30–60 min | Short `crates/tprobe/notes/cross-validation.md` (or `benches/README.md`) comparing criterion's estimate to tprobe's `mean min-p99` for the same workload.                                                 |
-| Polish — docs, README         | 30 min    | README Usage section gains a "Benches" pointer; note `cargo bench` as the entry point.                                                                                                                    |
+### Design decisions recorded here
 
-### Open design questions
-
-- **Shared benchmarkable API.** Adding `dispatch_batch` is
-  a tprobe-agnostic public API addition to `actor-x1`. The
-  bot thinks this is fine — it's a natural primitive the
-  goal1 CLI already uses internally — but it's an API
-  decision, not a pure refactor. Similar for goal2.
-  Alternative: hack the bench against `run_for(tiny_duration, inner)`
-  without adding new API; hackier but ~15 min faster.
-- **Measurement target.** Criterion defaults to "time per
-  call"; our interesting number is "time per message".
-  That's just `/inner` for goal1 and `/1` for goal2.
-  Criterion also supports `throughput(Throughput::Elements(N))`
-  which reports messages/sec directly — the bot thinks
-  using that makes output immediately comparable to
-  goal1's existing `M msg/s` line.
-- **goal2's warmup + calibration story.** Criterion runs
-  its own warmup automatically; tprobe's app-level warmup
-  is irrelevant in benches. And since criterion measures
-  wall-clock rather than subtracting framing, `calibrate()`
-  isn't needed either. Benches skip both, which simplifies
-  things.
+- **`SingleThreadRuntime::dispatch_batch` as a new
+  public API rather than a `run_for(tiny_duration, inner)`
+  hack.** `run_for` takes a wall-clock deadline and wraps
+  every scope in a `tprobe` `start`/`end_batch` pair —
+  neither fits criterion's "call this closure repeatedly"
+  shape. A minimal `dispatch_batch(inner) -> u64` primitive
+  with no timing bookkeeping is the natural `b.iter` shape,
+  and stays useful independent of the benches. Refactoring
+  `run_for` itself to delegate to `dispatch_batch` was
+  considered and deferred — keeps the diff narrow and
+  `run_for`'s probe integration is the thing actually
+  tested in production.
+- **`goal2-crit` scales the returned duration.**
+  `MultiThreadRuntime::run(warmup, measurement, pins)` is
+  wall-clock driven — there's no "run until N messages"
+  primitive, and the actor threads exchange messages
+  autonomously once running. Inside `iter_custom` the
+  bench runs a fixed measurement window, counts messages
+  handled, and returns `measurement * iters / total_count`
+  so criterion's per-iter estimate reads as per-message
+  time regardless of what `iters` value criterion picks.
+  Alternative — adding a message-counting stop signal to
+  `MultiThreadRuntime` — would bloat the runtime API for
+  a benchmark-only use case.
+- **Default configs are unpinned.** `goal1` and `goal2`
+  default to unpinned; the benches match that so the
+  no-flag comparison is apples-to-apples. Pinned
+  cross-validation (e.g. goal2 `--pin 1,12` vs a
+  pinned bench variant) can be added later via env var
+  or a second bench target if the comparison becomes
+  load-bearing.
+- **`criterion` default features enabled.** Brings in
+  `rayon` / `plotters` / `html_reports` for free. The
+  HTML reports under `target/criterion/` are useful for
+  eyeballing the distribution shape during
+  cross-validation; the compile-time cost (~30 s first
+  build) is absorbed once and cached afterwards.
+- **Single-step `0.4.0`.** Four artifacts — `dispatch_batch`,
+  criterion wiring, two bench files — review naturally as
+  one change. The earlier Future-work entry sketched a
+  `-N` ladder as optional; not needed.
 
 ### Cross-validation expectation
 
-The bot thinks criterion's per-iteration estimate and
-tprobe's `mean min-p99` should agree within:
+(Moved from the earlier Future-work entry so it stays
+discoverable next to the implementation.) The bot thinks
+`criterion`'s per-iteration estimate and `tprobe`'s
+`mean min-p99` should agree within:
 
 - **~10 %** on goal1 at `inner=1000` — both see a clean
   single-thread loop; probe apparatus is amortized.
-- **~15 %** on goal2 `--pin 1,12` — cross-thread noise is
-  larger, but with same-CCX pinning the signal stabilizes.
+- **~15 %** on goal2 unpinned — cross-thread noise is
+  larger; with same-CCX pinning (`--pin 1,12`) the
+  signal stabilizes.
 
 A larger discrepancy would be interesting — could point to
 probe bias (e.g. the OoO `rdtsc` coalescing artifact at
 `inner=1` showing up differently in criterion's sampling
 vs tprobe's direct histogram).
 
-### If multi-step is desired
-
-- `0.4.0-0` — plan marker.
-- `0.4.0-1` — expose `SingleThreadRuntime::dispatch_batch`
-  + `MultiThreadRuntime::dispatch_one` (or equivalent).
-- `0.4.0-2` — goal1 bench.
-- `0.4.0-3` — goal2 bench.
-- `0.4.0-4` — cross-validation narrative in
-  `crates/tprobe/notes/`.
-- `0.4.0` — close, README refresh.
-
-The bot's lean: single-step `0.4.0` if the `dispatch_batch`
-shape is clear up-front; multi-step if the API pieces
-deserve separate review.
+Spot check during development, unpinned on the dev box:
+`goal2` reported 228 K msg/s; `goal2-crit` reported
+~240 K msg/s. Within the expected range.
 
 ## Future work: linkme/inventory benchmark harness
 
