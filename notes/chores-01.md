@@ -1511,6 +1511,93 @@ Three classes of follow-up tracked in `notes/todo.md`:
    [`crates/actor-x1/notes/design.md`](../crates/actor-x1/notes/design.md)
    "Stage2 runtime" section.
 
+## Band-table decimals (default + `-d` override) (0.3.1)
+
+Two related display tweaks to the band-table report, shipped
+as a single 0.3.1 patch:
+
+**Default**: `band_table::render` formats ns-mode cells with
+one decimal place (`"4.5 ns"`) instead of rounding to integer
+nanoseconds (`"5 ns"`). Ticks mode is unchanged — integer
+counts are already precise. Resolves a long-standing
+readability issue where sub-ns detail was silently rounded
+away:
+
+- 1 hardware tick ≈ 0.26 ns on a 3.7 GHz box, so OoO-
+  coalesced `rdtsc` pairs and hdrhistogram's tightest
+  buckets (`range=1 tk`) rendered as `"0 ns"`, masking
+  real data.
+- Adjacent histogram buckets that hold distinct but close
+  values (e.g. 17 tk vs 18 tk at inner=1000) collapsed
+  to the same display (`"5 ns"`) despite being resolvable
+  in the underlying data.
+
+With one decimal the distinction becomes visible:
+`"4.5 ns"` vs `"4.7 ns"` vs `"5.0 ns"` on the same hot-
+cluster region, and the p1-p10 OoO cluster that used to
+render `0 ns` now shows `0.3 ns` — more honest.
+
+**Override**: new `-d / --decimals <N>` CLI flag on both
+`goal1` and `goal2`. Omit for the mode-aware default (0 for
+ticks, 1 for ns); pass an integer to force that precision
+in either mode. `-d 2` surfaces hdrhistogram's full 0.1 %
+relative resolution (`"4.22 ns"` vs `"4.48 ns"`); `-d 0`
+reproduces the pre-0.3.1 integer-ns look for anyone who
+preferred it.
+
+- `crates/actor-x1/Cargo.toml`: `0.3.0` → `0.3.1`.
+- `crates/tprobe/Cargo.toml`: `0.1.3` → `0.1.4` — public
+  API: `TProbe::report` and `band_table::render` both gain
+  a `decimals: Option<usize>` parameter.
+- `crates/tprobe/src/band_table.rs`:
+  `render(..., decimals: Option<usize>)`; top of the
+  function resolves `decimals.unwrap_or(if as_ticks { 0 }
+  else { 1 })` and that value threads through every
+  `fmt_commas_f64` call in band rows and summary rows.
+  Docstring updated.
+- `crates/tprobe/src/tprobe.rs`: `TProbe::report(&mut self,
+  as_ticks, overhead, decimals)`. Forwarded to
+  `band_table::render`. Test call sites updated (pass
+  `None` since they don't care about display precision).
+- `crates/actor-x1/src/bin/goal1.rs`,
+  `crates/actor-x1/src/bin/goal2.rs`: new
+  `#[arg(short = 'd', long)] decimals: Option<usize>`
+  field on each `Cli`. `report` calls forward
+  `cli.decimals`.
+- `README.md`: `## Usage` sample-output block regenerated
+  with the 1-decimal default. `### Flags` gains a
+  `-d / --decimals <N>` bullet between `-t / --ticks` and
+  `-p / --pin`.
+
+### Design decisions recorded here
+
+- **One decimal as the default, not zero.** Zero decimals
+  hid the sub-ns detail that the underlying histogram
+  already resolved; moving to one decimal surfaces it
+  with minimal column growth (+2 chars per cell). The
+  `-d` escape hatch handles the "I want more / less"
+  cases.
+- **Ticks mode default stays at 0 decimals.** Integer
+  tick counts are already exact — `".0"` would be
+  spurious noise. Users who want decimals in ticks mode
+  can explicitly pass `-d N`; the default won't inject
+  them.
+- **`decimals: Option<usize>` at the API layer, not a
+  `usize` with sentinel.** `None` means "use the
+  mode-aware default" and is the right abstraction for
+  the smart-default / override split. Callers who just
+  want the default pass `None` (and pay no attention to
+  what it resolves to); callers who care pass
+  `Some(n)`.
+- **`-d` on the CLI rather than two separate flags** (e.g.
+  `--precision` plus `--raw-integer`). One flag, one
+  integer, one abstraction — matches the pattern
+  already established by `-i/--inner`, `-w/--warmup`,
+  `-p/--pin`.
+- **Single-step `0.3.1` patch release.** Mechanical,
+  local, single display concern plus a small CLI flag —
+  doesn't need the `-N` ladder treatment.
+
 ## Future work: linkme/inventory benchmark harness
 
 Idea captured during `0.3.0-0`; not scheduled for

@@ -150,7 +150,10 @@ impl TProbe {
     /// Render a band-table report for this probe. `as_ticks`
     /// controls the display unit: `false` converts stored tick
     /// deltas to nanoseconds (default for the CLI); `true` shows
-    /// raw ticks (`-t`/`--ticks`).
+    /// raw ticks (`-t`/`--ticks`). `decimals` controls the
+    /// fractional precision of numeric cells — `None` uses a
+    /// mode-aware default (`0` for ticks, `1` for ns); `Some(n)`
+    /// overrides.
     ///
     /// Drains any pending `start` / `end*` records into the
     /// histogram as **raw** per-event values:
@@ -161,7 +164,7 @@ impl TProbe {
     /// `band_table::render`, which displays it in an `adj mean`
     /// column alongside the raw columns. See
     /// `notes/overhead-model.md`.
-    pub fn report(&mut self, as_ticks: bool, overhead: Option<&Overhead>) {
+    pub fn report(&mut self, as_ticks: bool, overhead: Option<&Overhead>, decimals: Option<usize>) {
         let mut total_correction_ticks: u128 = 0;
         let mut drained_count: u64 = 0;
         for r in self.records.drain(..) {
@@ -179,7 +182,9 @@ impl TProbe {
         } else {
             None
         };
-        band_table::render("tprobe", &self.name, &self.hist, as_ticks, correction);
+        band_table::render(
+            "tprobe", &self.name, &self.hist, as_ticks, correction, decimals,
+        );
     }
 }
 
@@ -242,7 +247,7 @@ mod tests {
             end_tsc: 1000,
             batch: 10,
         });
-        p.report(true, None);
+        p.report(true, None, None);
         assert_eq!(p.hist.len(), 1);
         let v = p.hist.iter_recorded().next().unwrap().value_iterated_to();
         // (1000 + 5) / 10 = 100.
@@ -266,7 +271,7 @@ mod tests {
             cal_raw_high_ticks: 0,
             cal_duration: Duration::from_millis(0),
         };
-        p.report(true, Some(&ovh));
+        p.report(true, Some(&ovh), None);
         let v = p.hist.iter_recorded().next().unwrap().value_iterated_to();
         // per_event_raw = (1000 + 5) / 10 = 100. Histogram stores
         // raw regardless of overhead; correction is applied only
@@ -284,12 +289,12 @@ mod tests {
         assert_eq!(p.hist.len(), 0);
         assert_eq!(p.records.len(), 2);
 
-        p.report(false, None);
+        p.report(false, None, None);
         assert_eq!(p.records.len(), 0);
         assert_eq!(p.hist.len(), 2);
 
         // Idempotent: a second report drains nothing, hist unchanged.
-        p.report(false, None);
+        p.report(false, None, None);
         assert_eq!(p.hist.len(), 2);
     }
 
@@ -298,7 +303,7 @@ mod tests {
         let mut p = TProbe::new("t");
         let id = p.start(1);
         p.end(id);
-        p.report(false, None); // moves record into hist
+        p.report(false, None, None); // moves record into hist
         assert_eq!(p.hist.len(), 1);
         p.clear();
         assert_eq!(p.records.len(), 0);

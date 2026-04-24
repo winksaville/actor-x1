@@ -60,6 +60,13 @@ struct Cli {
     #[arg(short = 't', long)]
     ticks: bool,
 
+    /// Fractional precision of numeric cells in the band table.
+    /// Omit for a mode-aware default (0 for ticks, 1 for ns) —
+    /// typically what you want. Pass an integer N to force N
+    /// decimals in either mode.
+    #[arg(short = 'd', long)]
+    decimals: Option<usize>,
+
     /// Pin each actor thread to a logical CPU. Accepts a
     /// comma-separated / range list; actor `i` pins to
     /// `pin[i % pin.len()]`. Examples: `--pin 0,1` pairs two
@@ -148,6 +155,6 @@ fn main() {
 
     for (i, (count, mut probe)) in results.into_iter().enumerate() {
         println!("  actor {i}: handled {count} messages");
-        probe.report(cli.ticks, Some(&overhead));
+        probe.report(cli.ticks, Some(&overhead), cli.decimals);
     }
 }

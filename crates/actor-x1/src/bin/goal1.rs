@@ -59,6 +59,13 @@ struct Cli {
     #[arg(short = 't', long)]
     ticks: bool,
 
+    /// Fractional precision of numeric cells in the band table.
+    /// Omit for a mode-aware default (0 for ticks, 1 for ns) —
+    /// typically what you want. Pass an integer N to force N
+    /// decimals in either mode.
+    #[arg(short = 'd', long)]
+    decimals: Option<usize>,
+
     /// Pin the workload thread to a logical CPU. Accepts a single
     /// id or a comma-separated / range list; only the first core
     /// is used (goal1 is single-threaded). Tightens stdev by
@@ -143,5 +150,6 @@ fn main() {
         per_event_ns,
     );
     println!();
-    rt.probe_mut().report(cli.ticks, Some(&overhead));
+    rt.probe_mut()
+        .report(cli.ticks, Some(&overhead), cli.decimals);
 }

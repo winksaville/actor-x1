@@ -39,12 +39,19 @@ const BOUNDARY_NAMES: &[&str] = &[
 /// that column blank — stdev is shift-invariant. If `None`, no
 /// adj column is rendered and the output matches the pre-0.3.0
 /// layout.
+///
+/// `decimals` controls the fractional precision of numeric
+/// cells. `None` uses the smart default: `0` in ticks mode
+/// (integers are already exact), `1` in ns mode (so sub-ns
+/// detail is visible rather than rounded away). `Some(n)`
+/// overrides both modes.
 pub(crate) fn render(
     kind: &str,
     name: &str,
     hist: &Histogram<u64>,
     as_ticks: bool,
     correction: Option<u64>,
+    decimals: Option<usize>,
 ) {
     let sample_count = hist.len();
     println!("  {kind}: {name} [count={}]", fmt_commas(sample_count));
@@ -57,6 +64,11 @@ pub(crate) fn render(
     let tpn = ticks::ticks_per_ns();
     let conv = |v: u64| -> f64 { if as_ticks { v as f64 } else { v as f64 / tpn } };
     let conv_f = |v: f64| -> f64 { if as_ticks { v } else { v / tpn } };
+    // Smart default: integer ticks are already precise, ns loses
+    // sub-ns resolution at 0 decimals (1 tk ≈ 0.26 ns renders as
+    // "0 ns"), so ns defaults to 1 decimal. Explicit `--decimals N`
+    // overrides.
+    let decimals = decimals.unwrap_or(if as_ticks { 0 } else { 1 });
     let correction_ticks_f = correction.map(|c| c as f64).unwrap_or(0.0);
     let show_adj = correction.is_some();
 
@@ -111,12 +123,12 @@ pub(crate) fn render(
         };
         rows.push(BandRow {
             label: format!("{}-{}", BOUNDARY_NAMES[i], BOUNDARY_NAMES[i + 1]),
-            first: fmt_commas_f64(first_v, 0),
-            last: fmt_commas_f64(last_v, 0),
-            range: fmt_commas_f64(range_v, 0),
+            first: fmt_commas_f64(first_v, decimals),
+            last: fmt_commas_f64(last_v, decimals),
+            range: fmt_commas_f64(range_v, decimals),
             count: fmt_commas(count),
-            mean: fmt_commas_f64(mean_v, 0),
-            adj_mean: fmt_commas_f64(adj_mean_v, 0),
+            mean: fmt_commas_f64(mean_v, decimals),
+            adj_mean: fmt_commas_f64(adj_mean_v, decimals),
         });
     }
 
@@ -124,10 +136,12 @@ pub(crate) fn render(
     // meaningful when `show_adj`.
     let hist_mean_ticks = hist.mean();
     let hist_stdev_ticks = hist.stdev();
-    let hist_mean_str = fmt_commas_f64(conv_f(hist_mean_ticks), 0);
-    let hist_mean_adj_str =
-        fmt_commas_f64(conv_f((hist_mean_ticks - correction_ticks_f).max(0.0)), 0);
-    let hist_stdev_str = fmt_commas_f64(conv_f(hist_stdev_ticks), 0);
+    let hist_mean_str = fmt_commas_f64(conv_f(hist_mean_ticks), decimals);
+    let hist_mean_adj_str = fmt_commas_f64(
+        conv_f((hist_mean_ticks - correction_ticks_f).max(0.0)),
+        decimals,
+    );
+    let hist_stdev_str = fmt_commas_f64(conv_f(hist_stdev_ticks), decimals);
 
     // Trimmed (min-p99) stats. `have_trim` is true when the
     // first 11 bands hold any samples; if all samples land in
@@ -162,9 +176,9 @@ pub(crate) fn render(
         };
         let trim_mean_adj = (trim_mean - correction_ticks_f).max(0.0);
         (
-            fmt_commas_f64(conv_f(trim_mean), 0),
-            fmt_commas_f64(conv_f(trim_mean_adj), 0),
-            fmt_commas_f64(conv_f(trim_stdev), 0),
+            fmt_commas_f64(conv_f(trim_mean), decimals),
+            fmt_commas_f64(conv_f(trim_mean_adj), decimals),
+            fmt_commas_f64(conv_f(trim_stdev), decimals),
             true,
         )
     } else {

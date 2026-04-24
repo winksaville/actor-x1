@@ -52,29 +52,29 @@ a common CLI shape:
 
 ```
 $ goal1 0.5 -i 1000 -p 0
-actor-x1 0.3.0
-goal1: 101028000 messages in 0.500s (202.056 M msg/s, inner=1000)
+actor-x1 0.3.1
+goal1: 102243000 messages in 0.500s (204.486 M msg/s, inner=1000)
   pinning: main → core 0
   apparatus: framing=21 tk (5.54 ns); loop_per_iter=0.93 tk (0.24 ns); per-event at inner=1000 = 1 tk (0.26 ns)
 
-  tprobe: goal1.dispatch [count=101,028]
-              first     last    range        count mean    adj mean
-    min-p1        0 ns     0 ns     0 ns         0    0 ns        0 ns
-    p1-p10        4 ns     4 ns     0 ns    18,076    4 ns        4 ns
-    p10-p20       0 ns     0 ns     0 ns         0    0 ns        0 ns
-    p20-p30       0 ns     0 ns     0 ns         0    0 ns        0 ns
-    p30-p40       5 ns     5 ns     0 ns    32,633    5 ns        4 ns
-    p40-p50       0 ns     0 ns     0 ns         0    0 ns        0 ns
-    p50-p60       0 ns     0 ns     0 ns         0    0 ns        0 ns
-    p60-p70       0 ns     0 ns     0 ns         0    0 ns        0 ns
-    p70-p80       5 ns     5 ns     0 ns    43,603    5 ns        5 ns
-    p80-p90       0 ns     0 ns     0 ns         0    0 ns        0 ns
-    p90-p99       5 ns     7 ns     2 ns     5,644    6 ns        6 ns
-    p99-max       7 ns    54 ns    47 ns     1,072    9 ns        9 ns
-    mean                                              5 ns        5 ns
-    stdev                                             1 ns
-    mean min-p99                                      5 ns        5 ns
-    stdev min-p99                                     0 ns
+  tprobe: goal1.dispatch [count=102,243]
+                first       last      range        count   mean      adj mean
+    min-p1        0.0 ns     0.0 ns     0.0 ns         0    0.0 ns        0.0 ns
+    p1-p10        0.0 ns     0.0 ns     0.0 ns         0    0.0 ns        0.0 ns
+    p10-p20       4.5 ns     4.5 ns     0.3 ns    27,412    4.5 ns        4.2 ns
+    p20-p30       0.0 ns     0.0 ns     0.0 ns         0    0.0 ns        0.0 ns
+    p30-p40       4.7 ns     4.7 ns     0.3 ns    22,761    4.7 ns        4.5 ns
+    p40-p50       0.0 ns     0.0 ns     0.0 ns         0    0.0 ns        0.0 ns
+    p50-p60       0.0 ns     0.0 ns     0.0 ns         0    0.0 ns        0.0 ns
+    p60-p70       0.0 ns     0.0 ns     0.0 ns         0    0.0 ns        0.0 ns
+    p70-p80       5.0 ns     5.0 ns     0.3 ns    49,494    5.0 ns        4.7 ns
+    p80-p90       0.0 ns     0.0 ns     0.0 ns         0    0.0 ns        0.0 ns
+    p90-p99       5.3 ns     5.8 ns     0.8 ns     1,722    5.6 ns        5.4 ns
+    p99-max       6.1 ns    49.0 ns    43.2 ns       854    8.5 ns        8.3 ns
+    mean                                                    4.8 ns        4.6 ns
+    stdev                                                   0.5 ns
+    mean min-p99                                            4.8 ns        4.6 ns
+    stdev min-p99                                           0.2 ns
 ```
 
 ### Flags
@@ -94,6 +94,11 @@ goal1: 101028000 messages in 0.500s (202.056 M msg/s, inner=1000)
   queue holds at most one message.
 - **`-t` / `--ticks`** — display probe values as raw ticks
   instead of nanoseconds.
+- **`-d` / `--decimals <N>`** — fractional precision of numeric
+  cells in the band table. Omit for a mode-aware default
+  (0 for ticks, 1 for ns) — typically what you want. Pass an
+  integer N to force N decimals in either mode (e.g. `-d 2`
+  for 2-decimal ns, `-d 0` for integer ns).
 - **`-p` / `--pin <CORES>`** — pin threads to logical CPUs. goal1 uses
   the first core in the list; goal2 pins actor `i` to
   `cores[i % len]`. Accepts comma lists and ranges: `--pin 5`,
