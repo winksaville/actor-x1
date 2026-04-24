@@ -53,7 +53,7 @@ struct Cli {
     /// so cache / branch-predictor / frequency land in the same
     /// state by the time the probe is cleared and measurement
     /// begins.
-    #[arg(long, default_value_t = 10.0, value_parser = parse_non_negative_secs)]
+    #[arg(short = 'w', long, default_value_t = 0.5, value_parser = parse_non_negative_secs)]
     warmup: f64,
 
     /// Display probe values as raw ticks instead of nanoseconds.
@@ -66,7 +66,7 @@ struct Cli {
     /// actors to two CPUs; `--pin 0` oversubscribes both onto
     /// one core. Tightens stdev by eliminating OS thread
     /// migration noise.
-    #[arg(long)]
+    #[arg(short = 'p', long)]
     pin: Option<String>,
 }
 

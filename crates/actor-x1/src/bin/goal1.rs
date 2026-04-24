@@ -45,14 +45,14 @@ struct Cli {
     /// same dispatch loop as the measurement phase (probe active)
     /// so cache/branch-predictor/frequency land in the same state
     /// by the time the probe is cleared and measurement begins.
-    #[arg(long, default_value_t = 10.0, value_parser = parse_non_negative_secs)]
+    #[arg(short = 'w', long, default_value_t = 0.5, value_parser = parse_non_negative_secs)]
     warmup: f64,
 
     /// Number of dispatches per probe scope. Larger values
     /// amortize probe apparatus overhead and push stored tick
     /// values into a range where the histogram's 0.1 %-relative
     /// buckets resolve small variations.
-    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u64).range(1..))]
+    #[arg(short = 'i', long, default_value_t = 1, value_parser = clap::value_parser!(u64).range(1..))]
     inner: u64,
 
     /// Display probe values as raw ticks instead of nanoseconds.
@@ -63,7 +63,7 @@ struct Cli {
     /// id or a comma-separated / range list; only the first core
     /// is used (goal1 is single-threaded). Tightens stdev by
     /// eliminating OS thread migration noise.
-    #[arg(long)]
+    #[arg(short = 'p', long)]
     pin: Option<String>,
 }
 

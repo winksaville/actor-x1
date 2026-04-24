@@ -1326,6 +1326,75 @@ neither of which add value over the normal output.
   owns the measurement primitives and warmup is a
   sibling concern. Tracked in `notes/todo.md`.
 
+## Lower `--warmup` default 10 s → 0.5 s (0.3.0-5)
+
+Changes the `--warmup` default on `goal1` and `goal2` from
+`10.0` seconds to `0.5` seconds. The 10 s default dominated
+wall-clock time for short iterative runs (e.g.
+`goal1 1 --inner 10` spent 91 % of its total time in
+warmup), which was an ergonomic trap — users assumed
+calibration was slow when it was actually the warmup. The
+new 0.5 s default lets `goal1 <seconds>` and
+`goal2 <seconds>` run for roughly `seconds + 0.5 + ~0.01`
+wall-clock, which matches what the CLI suggests. Users who
+want long warmup for reference-quality measurement can pass
+`--warmup 10` explicitly.
+
+At 0.5 s the CPU is typically at or very near its boost
+frequency and caches/branch-predictors are primed for the
+dispatch loop. `tprobe`'s `calibrate()` runs immediately
+after and finishes in ~10 ms, so 0.5 s remains ample
+headroom for the steady-state conditions calibration
+assumes (see `crates/tprobe/notes/overhead-model.md`
+"Calibration preconditions").
+
+- `crates/actor-x1/src/bin/goal1.rs`,
+  `crates/actor-x1/src/bin/goal2.rs`:
+  `#[arg(long, default_value_t = 10.0, ...)]` →
+  `default_value_t = 0.5`. Also adds `short` aliases to
+  match the already-existing `-t/--ticks`: `-w/--warmup`,
+  `-p/--pin` on both binaries, plus `-i/--inner` on goal1
+  (goal2 doesn't have `--inner`). `-h` and `-V` stay
+  reserved for help / version per clap's defaults.
+- `README.md`: `--warmup` bullet default line updated
+  (`default 10.0` → `default 0.5`); usage guidance reworded
+  to recommend `--warmup 10` for reference measurements and
+  `--warmup 0` for fastest iteration. Flag bullets gain
+  the short aliases (`-w`, `-i`, `-p`) in the same style as
+  the pre-existing `-t / --ticks`. Other stale samples /
+  narrative still get their full refresh at the `0.3.0`
+  closing marker.
+
+### Design decisions recorded here
+
+- **0.5 s, not a proportional fraction.** Earlier discussion
+  considered `min(duration / 10, 2 s)`-style proportional
+  warmup, but a fixed small default is simpler, predictable
+  across durations, and cheap enough even for 0.1 s runs
+  (warmup is ~5× the measurement, but total wall-clock is
+  still sub-second). Users who want proportional behavior
+  can script it; defaulting to a fixed 0.5 s gives a single
+  number to remember.
+- **0.5 s rather than 0.1 s or 1.0 s.** 0.1 s is cutting
+  the CPU-settle margin too close for some systems; 1.0 s
+  starts feeling slow on `goal1 0.5` type runs (warmup
+  dominates again). 0.5 s is a pragmatic middle: long
+  enough to settle, short enough to disappear in the
+  terminal.
+- **No alias or `--fast`-style flag added.** Setting
+  `--warmup 0` is already the "fastest" mode; adding a
+  separate flag for the same effect would be noise. Users
+  who want zero-warmup explicitly can pass it; the default
+  just stops penalizing them by default.
+- **Short flag aliases folded in here.** `-w/-i/-p` short
+  forms matching the `-t/--ticks` pattern are CLI-polish
+  that fits the "warmup ergonomics" theme of this step
+  (interactive iteration gets `goal1 1 -w 0 -i 1000 -p 0`
+  instead of the longer spelling). Small, mechanical, and
+  the same CLI diff region — not worth its own step. If
+  we'd added them at any other point it would have been
+  spurious churn to `Cli` alone.
+
 ## Future work: linkme/inventory benchmark harness
 
 Idea captured during `0.3.0-0`; not scheduled for

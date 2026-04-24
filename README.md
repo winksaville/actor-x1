@@ -81,18 +81,20 @@ goal1: 102087000 messages in 0.500s (204.174 M msg/s, inner=1000)
 
 - **`<duration_s>`** — positional, required; measurement window
   in seconds.
-- **`--warmup <SECS>`** — default 10.0; run the same dispatch
-  loop with the probe active for this long, then clear the probe
-  at the boundary so only steady-state data reaches the report.
-  Set to 0 for quick iteration.
-- **`--inner <N>`** *(goal1 only)* — default 1, ≥1; dispatches
-  per probe scope. Larger values amortize the probe's two-`rdtsc`
-  apparatus cost and give the histogram meaningful dynamic range.
-  goal2 fixes `inner=1` because its per-channel queue holds at
-  most one message.
+- **`-w` / `--warmup <SECS>`** — default 0.5; run the same
+  dispatch loop with the probe active for this long, then clear
+  the probe at the boundary so only steady-state data reaches
+  the report. Set to 0 for quickest iteration; raise to 10 s or
+  more for reference measurements where you want the CPU fully
+  settled.
+- **`-i` / `--inner <N>`** *(goal1 only)* — default 1, ≥1;
+  dispatches per probe scope. Larger values amortize the probe's
+  two-`rdtsc` apparatus cost and give the histogram meaningful
+  dynamic range. goal2 fixes `inner=1` because its per-channel
+  queue holds at most one message.
 - **`-t` / `--ticks`** — display probe values as raw ticks
   instead of nanoseconds.
-- **`--pin <CORES>`** — pin threads to logical CPUs. goal1 uses
+- **`-p` / `--pin <CORES>`** — pin threads to logical CPUs. goal1 uses
   the first core in the list; goal2 pins actor `i` to
   `cores[i % len]`. Accepts comma lists and ranges: `--pin 5`,
   `--pin 0,1`, `--pin 0-3`, `--pin 0,0` (oversubscribe).

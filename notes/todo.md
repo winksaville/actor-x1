@@ -5,7 +5,7 @@ and reference links to more details.
 
 ## In Progress
 
-- Remove `--raw` flag, always calibrate (0.3.0-4) [[13]]
+- Lower `--warmup` default 10 s → 0.5 s (0.3.0-5) [[14]]
 
 ## Todo
 
@@ -16,7 +16,6 @@ See [Foramt details](README.md#todo-format)
 - Explore `linkme` / `inventory` for a benchmark harness on top of
   `tprobe` — self-registering benchmarks (no `main()` edits per
   benchmark); possibly reusable for actor registration too [[9]]
-- Lower warmup default 10 s → 0.5 s (0.3.0-5)
 - After 0.3.0: add a `criterion` benchmark mirroring the goal1 /
   goal2 workloads, so `tprobe`'s numbers can be cross-validated
   against an established statistical-sampling harness
@@ -85,6 +84,7 @@ and older `## Done` sections are moved to [done.md](done.md) to keep this file s
 - Notes reorg + per-crate READMEs + overhead-model.md (0.3.0-1) [[10]]
 - Extend subtraction to framing + loop_per_iter (0.3.0-2) [[11]]
 - Band-table raw columns + `adj mean` column (0.3.0-3) [[12]]
+- Remove `--raw` flag, always calibrate (0.3.0-4) [[13]]
 
 
 # References
@@ -102,3 +102,4 @@ and older `## Done` sections are moved to [done.md](done.md) to keep this file s
 [11]: chores-01.md#extend-subtraction-to-framing--loop_per_iter-030-2
 [12]: chores-01.md#band-table-raw-columns--adj-mean-column-030-3
 [13]: chores-01.md#remove---raw-flag-always-calibrate-030-4
+[14]: chores-01.md#lower---warmup-default-10-s--05-s-030-5
