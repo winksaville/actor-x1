@@ -86,6 +86,7 @@ and older `## Done` sections are moved to [done.md](done.md) to keep this file s
 - Lower `--warmup` default 10 s → 0.5 s (0.3.0-5) [[14]]
 - Band-table format + overhead docs (0.3.0) [[15]]
 - Band-table decimals: default + `-d` override (0.3.1) [[16]]
+- Comma-format summary counts (0.3.2) [[17]]
 
 
 # References
@@ -106,3 +107,4 @@ and older `## Done` sections are moved to [done.md](done.md) to keep this file s
 [14]: chores-01.md#lower---warmup-default-10-s--05-s-030-5
 [15]: chores-01.md#band-table-format--overhead-docs-030
 [16]: chores-01.md#band-table-decimals-default--d-override-031
+[17]: chores-01.md#comma-format-summary-counts-032

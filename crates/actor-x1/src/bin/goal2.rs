@@ -16,7 +16,7 @@ use std::time::Duration;
 use actor_x1::runtime::MultiThreadRuntime;
 use actor_x1::{Actor, Context, Message};
 use clap::Parser;
-use tprobe::{self as perf, pin, ticks};
+use tprobe::{self as perf, fmt_commas, pin, ticks};
 
 /// Actor that, on every message received, sends exactly one
 /// message back to its configured peer. Same as goal1's but must
@@ -124,7 +124,8 @@ fn main() {
     let total_count: u64 = results.iter().map(|(c, _)| *c).sum();
     let mmps = total_count as f64 / cli.duration_s / 1e6;
     println!(
-        "goal2: {total_count} messages in {:.3}s ({mmps:.3} M msg/s, {n} actors, inner=1)",
+        "goal2: {} messages in {:.3}s ({mmps:.3} M msg/s, {n} actors, inner=1)",
+        fmt_commas(total_count),
         cli.duration_s,
         n = results.len(),
     );
@@ -154,7 +155,7 @@ fn main() {
     println!();
 
     for (i, (count, mut probe)) in results.into_iter().enumerate() {
-        println!("  actor {i}: handled {count} messages");
+        println!("  actor {i}: handled {} messages", fmt_commas(count));
         probe.report(cli.ticks, Some(&overhead), cli.decimals);
     }
 }

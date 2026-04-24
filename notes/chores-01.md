@@ -1598,6 +1598,58 @@ preferred it.
   local, single display concern plus a small CLI flag —
   doesn't need the `-N` ladder treatment.
 
+## Comma-format summary counts (0.3.2)
+
+Pulls `fmt_commas` up into `tprobe`'s public API so the
+`goal1` / `goal2` binaries can reuse it on their summary
+lines. The raw message counts on those lines used to render
+undifferentiated — e.g. `goal1: 61687000 messages` — which
+at 8-9 digits was hard to read at a glance. They now read
+`goal1: 61,687,000 messages`, matching the band-table
+report's existing comma formatting for `count=N` and band
+`count` columns.
+
+- `crates/actor-x1/Cargo.toml`: `0.3.1` → `0.3.2`.
+- `crates/tprobe/Cargo.toml`: `0.1.4` → `0.1.5` — API
+  surface gains two re-exports.
+- `crates/tprobe/src/lib.rs`: `pub(crate) mod fmt;` →
+  `pub mod fmt;`; adds `pub use fmt::{fmt_commas,
+  fmt_commas_f64};` at the crate root.
+- `crates/actor-x1/src/bin/goal1.rs`,
+  `crates/actor-x1/src/bin/goal2.rs`: `use tprobe::...`
+  gains `fmt_commas`; the `goalN: <count> messages ...`
+  summary line uses `fmt_commas(count)`. goal2 also
+  comma-formats the per-actor `"  actor i: handled N
+  messages"` line. goal1 additionally comma-formats
+  `inner=N` in both its summary line and the
+  `apparatus:` line (relevant once users pass
+  `-i 1000000` or similar).
+
+### Design decisions recorded here
+
+- **Promote `fmt_commas` to public rather than duplicate
+  it.** The utility already lives in `tprobe` (needed by
+  the band-table renderer). Binaries reusing it via
+  `pub use` is cheaper than copy-pasting two functions
+  into actor-x1 — and if `tprobe` ever publishes, the
+  helpers travel with it as part of a coherent surface.
+- **Re-export at the crate root, keep `fmt` module also
+  public.** `use tprobe::fmt_commas` is the ergonomic
+  short path; `use tprobe::fmt::fmt_commas` still works
+  for callers who prefer module-qualified imports.
+  Exporting only `fmt_commas` would be stricter but the
+  paired `fmt_commas_f64` has the same utility shape,
+  so both go. `fmt::fmt` module name is workspace-local
+  and unlikely to collide.
+- **Only message counts comma-formatted, not the
+  throughput / wall-clock floats.** `204.486 M msg/s` is
+  fine as a 4-5 char decimal; `0.300s` is likewise
+  small. The comma-format helper targets integer counts
+  where the digit grouping actually helps.
+- **Single-step `0.3.2` patch release.** Two-file
+  application change plus a one-line `lib.rs` re-export.
+  No `-N` ladder.
+
 ## Future work: linkme/inventory benchmark harness
 
 Idea captured during `0.3.0-0`; not scheduled for

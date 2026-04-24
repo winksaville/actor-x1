@@ -11,7 +11,7 @@ use std::time::Duration;
 use actor_x1::runtime::SingleThreadRuntime;
 use actor_x1::{Actor, Context, Message};
 use clap::Parser;
-use tprobe::{self as perf, pin, ticks};
+use tprobe::{self as perf, fmt_commas, pin, ticks};
 
 /// Actor that, on every message received, sends exactly one message
 /// back to its configured peer.
@@ -127,8 +127,10 @@ fn main() {
     let count = rt.run_for(Duration::from_secs_f64(cli.duration_s), cli.inner);
     let mmps = count as f64 / cli.duration_s / 1e6;
     println!(
-        "goal1: {count} messages in {:.3}s ({mmps:.3} M msg/s, inner={})",
-        cli.duration_s, cli.inner,
+        "goal1: {} messages in {:.3}s ({mmps:.3} M msg/s, inner={})",
+        fmt_commas(count),
+        cli.duration_s,
+        fmt_commas(cli.inner),
     );
     match pin_core {
         Some(c) => println!("  pinning: main → core {c}"),
@@ -145,7 +147,7 @@ fn main() {
         framing_ns,
         overhead.loop_per_iter_ticks,
         lpi_ns,
-        cli.inner,
+        fmt_commas(cli.inner),
         per_event_tk,
         per_event_ns,
     );

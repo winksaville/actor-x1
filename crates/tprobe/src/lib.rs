@@ -7,11 +7,12 @@
 //! "everything else" category, and the current subtraction policy).
 
 pub(crate) mod band_table;
-pub(crate) mod fmt;
+pub mod fmt;
 pub mod overhead;
 pub mod pin;
 pub mod ticks;
 pub mod tprobe;
 
+pub use fmt::{fmt_commas, fmt_commas_f64};
 pub use overhead::{Overhead, calibrate};
 pub use tprobe::{TProbe, TProbeRecId};
