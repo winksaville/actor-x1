@@ -59,12 +59,6 @@ struct Cli {
     #[arg(short = 't', long)]
     ticks: bool,
 
-    /// Skip apparatus-overhead calibration and report uncorrected
-    /// per-event values. Use to see the raw cost the probe sees,
-    /// including its own two-rdtsc framing (~4 ns on modern x86).
-    #[arg(long)]
-    raw: bool,
-
     /// Pin the workload thread to a logical CPU. Accepts a single
     /// id or a comma-separated / range list; only the first core
     /// is used (goal1 is single-threaded). Tightens stdev by
@@ -117,14 +111,10 @@ fn main() {
     rt.run_for(Duration::from_secs_f64(cli.warmup), cli.inner);
     rt.probe_mut().clear();
 
-    // Calibration (skipped with --raw). Runs on the warmed system,
-    // before measurement begins, so freq/cache state matches what
-    // the probe will see during measurement.
-    let overhead = if cli.raw {
-        None
-    } else {
-        Some(perf::calibrate())
-    };
+    // Calibration runs on the warmed system, before measurement
+    // begins, so freq/cache state matches what the probe will see
+    // during measurement.
+    let overhead = perf::calibrate();
 
     // Measurement.
     let count = rt.run_for(Duration::from_secs_f64(cli.duration_s), cli.inner);
@@ -137,25 +127,21 @@ fn main() {
         Some(c) => println!("  pinning: main → core {c}"),
         None => println!("  pinning: none (unpinned)"),
     }
-    if let Some(ovh) = &overhead {
-        let tpn = ticks::ticks_per_ns();
-        let framing_ns = ovh.framing_ticks as f64 / tpn;
-        let lpi_ns = ovh.loop_per_iter_ticks / tpn;
-        let per_event_tk = ovh.per_event_ticks(cli.inner);
-        let per_event_ns = per_event_tk as f64 / tpn;
-        println!(
-            "  apparatus: framing={} tk ({:.2} ns); loop_per_iter={:.2} tk ({:.2} ns); per-event at inner={} = {} tk ({:.2} ns)",
-            ovh.framing_ticks,
-            framing_ns,
-            ovh.loop_per_iter_ticks,
-            lpi_ns,
-            cli.inner,
-            per_event_tk,
-            per_event_ns,
-        );
-    } else {
-        println!("  apparatus: raw (no overhead subtraction)");
-    }
+    let tpn = ticks::ticks_per_ns();
+    let framing_ns = overhead.framing_ticks as f64 / tpn;
+    let lpi_ns = overhead.loop_per_iter_ticks / tpn;
+    let per_event_tk = overhead.per_event_ticks(cli.inner);
+    let per_event_ns = per_event_tk as f64 / tpn;
+    println!(
+        "  apparatus: framing={} tk ({:.2} ns); loop_per_iter={:.2} tk ({:.2} ns); per-event at inner={} = {} tk ({:.2} ns)",
+        overhead.framing_ticks,
+        framing_ns,
+        overhead.loop_per_iter_ticks,
+        lpi_ns,
+        cli.inner,
+        per_event_tk,
+        per_event_ns,
+    );
     println!();
-    rt.probe_mut().report(cli.ticks, overhead.as_ref());
+    rt.probe_mut().report(cli.ticks, Some(&overhead));
 }

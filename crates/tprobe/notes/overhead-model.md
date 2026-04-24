@@ -9,6 +9,21 @@ Calibration runs a two-point fit on an empty `black_box(1)`
 bench and produces two numbers, both recorded on the
 `Overhead` struct.
 
+### Calibration preconditions
+
+`calibrate()` assumes the CPU is already at its boost
+frequency with caches / branch-predictors primed — it runs
+the two-point fit directly, with no internal warmup of its
+own. `goal1` / `goal2` satisfy this by running an app-level
+dispatch-loop warmup (`--warmup`) before calling
+`calibrate()`; a benchmark harness that calls `calibrate()`
+directly should run its own warmup first (a tight loop of
+`read_ticks()` + `black_box(...)`, or the actual workload,
+for at least a hundred milliseconds). Without warmup, the
+fitted `raw_low` / `raw_high` are biased high — CPU
+frequency starts at base clock and ramps to boost during
+the first measurement.
+
 ### Framing — `framing_ticks` (per scope)
 
 The hardware cost of the two `rdtsc` reads that bracket

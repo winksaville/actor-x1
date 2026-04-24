@@ -5,7 +5,7 @@ and reference links to more details.
 
 ## In Progress
 
-- Band-table raw columns + `adj mean` column (0.3.0-3) [[12]]
+- Remove `--raw` flag, always calibrate (0.3.0-4) [[13]]
 
 ## Todo
 
@@ -16,11 +16,17 @@ See [Foramt details](README.md#todo-format)
 - Explore `linkme` / `inventory` for a benchmark harness on top of
   `tprobe` — self-registering benchmarks (no `main()` edits per
   benchmark); possibly reusable for actor registration too [[9]]
-- Remove `--raw` flag, always calibrate (0.3.0-4)
 - Lower warmup default 10 s → 0.5 s (0.3.0-5)
 - After 0.3.0: add a `criterion` benchmark mirroring the goal1 /
   goal2 workloads, so `tprobe`'s numbers can be cross-validated
   against an established statistical-sampling harness
+- When a benchmark harness lands (criterion and/or the
+  linkme/inventory idea at `[9]`), add a CPU-warmup helper to
+  `tprobe` — probably `tprobe::warmup::cpu_boost(iterations)` or
+  `cpu_boost(Duration)` — since `calibrate()` no longer warms
+  the CPU itself. Harnesses that call `calibrate()` directly
+  (without an app-level dispatch loop) need to prime the CPU to
+  boost frequency first
 - Revisit band-table `range` semantics — drop the `+1` so
   `first == last → range = 0` (true "no spread" instead of
   today's "1 tk / rounds to 0 ns"). `last - first` reads
@@ -78,6 +84,7 @@ and older `## Done` sections are moved to [done.md](done.md) to keep this file s
 - Band-table format + overhead docs — plan marker (0.3.0-0) [[8]]
 - Notes reorg + per-crate READMEs + overhead-model.md (0.3.0-1) [[10]]
 - Extend subtraction to framing + loop_per_iter (0.3.0-2) [[11]]
+- Band-table raw columns + `adj mean` column (0.3.0-3) [[12]]
 
 
 # References
@@ -94,3 +101,4 @@ and older `## Done` sections are moved to [done.md](done.md) to keep this file s
 [10]: chores-01.md#notes-reorg--per-crate-readmes--overhead-modelmd-030-1
 [11]: chores-01.md#extend-subtraction-to-framing--loop_per_iter-030-2
 [12]: chores-01.md#band-table-raw-columns--adj-mean-column-030-3
+[13]: chores-01.md#remove---raw-flag-always-calibrate-030-4

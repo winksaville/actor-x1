@@ -60,11 +60,6 @@ struct Cli {
     #[arg(short = 't', long)]
     ticks: bool,
 
-    /// Skip apparatus-overhead calibration and report uncorrected
-    /// per-event values.
-    #[arg(long)]
-    raw: bool,
-
     /// Pin each actor thread to a logical CPU. Accepts a
     /// comma-separated / range list; actor `i` pins to
     /// `pin[i % pin.len()]`. Examples: `--pin 0,1` pairs two
@@ -87,9 +82,9 @@ fn parse_non_negative_secs(s: &str) -> Result<f64, String> {
     }
 }
 
-/// Parse CLI, calibrate apparatus (unless --raw), run two
-/// ping-pong actors on their own threads, print summary and
-/// per-actor `tprobe` band-table reports.
+/// Parse CLI, calibrate apparatus, run two ping-pong actors on
+/// their own threads, print summary and per-actor `tprobe`
+/// band-table reports.
 fn main() {
     let cli = Cli::parse();
     println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"),);
@@ -97,11 +92,7 @@ fn main() {
     // Calibrate on main thread before spawning. Matches goal1's
     // calibration code path; actor threads share the same CPU
     // microarchitecture so a single Overhead is good enough.
-    let overhead = if cli.raw {
-        None
-    } else {
-        Some(perf::calibrate())
-    };
+    let overhead = perf::calibrate();
 
     let mut rt = MultiThreadRuntime::new("goal2.dispatch");
     let a_id = rt.add_actor(|| PingPongActor { peer_id: 1 });
@@ -130,24 +121,20 @@ fn main() {
         cli.duration_s,
         n = results.len(),
     );
-    if let Some(ovh) = &overhead {
-        let tpn = ticks::ticks_per_ns();
-        let framing_ns = ovh.framing_ticks as f64 / tpn;
-        let lpi_ns = ovh.loop_per_iter_ticks / tpn;
-        let per_event_tk = ovh.per_event_ticks(1);
-        let per_event_ns = per_event_tk as f64 / tpn;
-        println!(
-            "  apparatus: framing={} tk ({:.2} ns); loop_per_iter={:.2} tk ({:.2} ns); per-event at inner=1 = {} tk ({:.2} ns)",
-            ovh.framing_ticks,
-            framing_ns,
-            ovh.loop_per_iter_ticks,
-            lpi_ns,
-            per_event_tk,
-            per_event_ns,
-        );
-    } else {
-        println!("  apparatus: raw (no overhead subtraction)");
-    }
+    let tpn = ticks::ticks_per_ns();
+    let framing_ns = overhead.framing_ticks as f64 / tpn;
+    let lpi_ns = overhead.loop_per_iter_ticks / tpn;
+    let per_event_tk = overhead.per_event_ticks(1);
+    let per_event_ns = per_event_tk as f64 / tpn;
+    println!(
+        "  apparatus: framing={} tk ({:.2} ns); loop_per_iter={:.2} tk ({:.2} ns); per-event at inner=1 = {} tk ({:.2} ns)",
+        overhead.framing_ticks,
+        framing_ns,
+        overhead.loop_per_iter_ticks,
+        lpi_ns,
+        per_event_tk,
+        per_event_ns,
+    );
     if pin_cores.is_empty() {
         println!("  pinning: none (unpinned)");
     } else {
@@ -161,6 +148,6 @@ fn main() {
 
     for (i, (count, mut probe)) in results.into_iter().enumerate() {
         println!("  actor {i}: handled {count} messages");
-        probe.report(cli.ticks, overhead.as_ref());
+        probe.report(cli.ticks, Some(&overhead));
     }
 }

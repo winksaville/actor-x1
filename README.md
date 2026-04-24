@@ -92,8 +92,6 @@ goal1: 102087000 messages in 0.500s (204.174 M msg/s, inner=1000)
   most one message.
 - **`-t` / `--ticks`** — display probe values as raw ticks
   instead of nanoseconds.
-- **`--raw`** — skip apparatus-overhead calibration; show the raw
-  per-event cost including framing contamination.
 - **`--pin <CORES>`** — pin threads to logical CPUs. goal1 uses
   the first core in the list; goal2 pins actor `i` to
   `cores[i % len]`. Accepts comma lists and ranges: `--pin 5`,

@@ -16,10 +16,6 @@ use std::time::{Duration, Instant};
 
 use crate::ticks;
 
-/// Calibration warmup iterations — lets CPU frequency boost ramp
-/// before the first real sample.
-pub const CAL_WARMUP: u64 = 10_000;
-
 /// Samples per minimum-pass. The reported floor approaches the
 /// hardware lower bound as samples grow; 1,000 is enough for
 /// convergence and keeps total calibration wall-clock short.
@@ -93,18 +89,19 @@ fn measure_empty_raw(samples: u64, inner: u64) -> u64 {
     min_ticks
 }
 
-/// Two-point calibration. Runs [`CAL_WARMUP`] warmup iterations,
-/// then two minimum-passes at `inner = N_LOW` and `inner = N_HIGH`,
-/// and fits
+/// Two-point calibration. Runs two minimum-passes at
+/// `inner = N_LOW` and `inner = N_HIGH`, then fits
 /// `raw_delta = framing + inner · loop_per_iter`. Blocks for
 /// ~10 ms on a modern x86.
+///
+/// Assumes the CPU is already warm (at its boost frequency and
+/// with caches/branch-predictors primed). `goal1` / `goal2`
+/// satisfy this by running an app-level warmup loop before
+/// calling `calibrate`; a benchmark harness that calls this
+/// directly should run its own warmup first. See
+/// `notes/overhead-model.md`.
 pub fn calibrate() -> Overhead {
     let cal_start = Instant::now();
-
-    for _ in 0..CAL_WARMUP {
-        let a = ticks::read_ticks();
-        black_box(a);
-    }
 
     let raw_low = measure_empty_raw(CAL_SAMPLES, N_LOW);
     let raw_high = measure_empty_raw(CAL_SAMPLES, N_HIGH);

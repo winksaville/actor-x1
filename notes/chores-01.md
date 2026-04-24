@@ -1240,6 +1240,92 @@ on the hot bucket.
   the separator makes the raw-vs-derived distinction
   visually obvious without widening every column.
 
+## Remove --raw flag, always calibrate (0.3.0-4)
+
+Drops the `--raw` CLI flag from both `goal1` and `goal2`.
+Calibration is now unconditional (~10 ms wall-clock on
+modern x86). Since the band-table report has shown raw
+columns since 0.3.0-3, the `--raw` flag's only remaining
+effect was to suppress the `adj mean` column and emit the
+`apparatus: raw (no overhead subtraction)` diagnostic —
+neither of which add value over the normal output.
+
+- `crates/actor-x1/src/bin/goal1.rs`: `raw: bool` field
+  removed from `Cli`. The calibration call is now
+  unconditional (`perf::calibrate()` instead of
+  `if cli.raw { None } else { Some(perf::calibrate()) }`).
+  The "apparatus: raw" branch of the diagnostic is gone;
+  the remaining branch is unconditional. `overhead` is an
+  `Overhead` rather than `Option<Overhead>`; `.report`
+  receives `Some(&overhead)`.
+- `crates/actor-x1/src/bin/goal2.rs`: same CLI + main-fn
+  changes. The `/// Parse CLI, calibrate apparatus (unless
+  --raw), ...` docstring loses the `(unless --raw)` qualifier.
+- `crates/tprobe/Cargo.toml`: `0.1.2` → `0.1.3` — drops the
+  `CAL_WARMUP` pub const.
+- `crates/tprobe/src/overhead.rs`: `CAL_WARMUP` const and
+  its 10,000-iteration warmup loop removed from
+  `calibrate()`. `goal1` / `goal2` already do a full
+  dispatch-loop warmup before calling `calibrate()`, so the
+  bare-`rdtsc` warmup was redundant — it also wasn't
+  warming the calibration's actual inner loop
+  (`for _ in 0..inner { black_box(1u64); }`), only the
+  `rdtsc` path. Calibrate's docstring gains a
+  "caller-warmup expected" note pointing at
+  `notes/overhead-model.md`.
+- `crates/tprobe/notes/overhead-model.md`: new
+  "Calibration preconditions" subsection documenting the
+  caller-warmup contract.
+- `README.md`: the `--raw` bullet is removed from the Flags
+  section. Other references in the "bot's understanding"
+  narrative (e.g. "`--raw --inner 1` reads ~9 ns") become
+  stale and will be rewritten in `0.3.0` alongside the
+  sample-output refresh; leaving them for now to avoid
+  scope-creep into -4.
+
+### Design decisions recorded here
+
+- **`Overhead` not `Option<Overhead>` at the call site.**
+  Calibration is unconditional, so the CLI-layer wrapper
+  is always `Some`. Unwrapping it to `Overhead` at the
+  top-level makes the diagnostic block simpler (no more
+  `if let Some(ovh)`). `TProbe::report` still accepts
+  `Option<&Overhead>` — the wrapper at the probe API is
+  left intact so future library consumers retain the
+  ability to opt out of overhead display.
+- **`band_table::render`'s `None` path kept.** It's
+  pub(crate) and only reached when `TProbe::report` is
+  called with `overhead = None`; no longer reachable
+  from the CLI. Could be deleted as dead code, but the
+  probe API still accepts `None` so keeping the renderer
+  consistent costs nothing. If we later commit to
+  "overhead always present" at the probe layer, we can
+  drop both branches in one step.
+- **README sample outputs not updated here.** The
+  `## Usage`, `## Reading the band table`, and
+  `## The bot's understanding` sections still show
+  pre-0.3.0 output format (no `adj mean` column) and
+  reference `--raw`. All of it gets rewritten at the
+  `0.3.0` closing marker; keeping it out of `-4` keeps
+  the diff focused on flag removal.
+- **`CAL_WARMUP` removal not hidden as a tprobe-only
+  patch.** Folding this into `0.3.0-4` alongside `--raw`
+  removal keeps the "calibration flow simplification"
+  story in one step. tprobe bumps to `0.1.3` for the
+  public-const removal (our convention per `0.2.0-3`:
+  patch bumps are "content changed" signals for the
+  path-dep consumer).
+- **Future benchmark-crate warmup helper.** When we build
+  a benchmark harness (see the linkme/inventory idea
+  captured at 0.3.0-0), the harness will need a warmup
+  helper since it calls `calibrate()` without an
+  app-level dispatch loop to warm the CPU. The bot thinks
+  the right home is `tprobe` — probably a new
+  `tprobe::warmup` module with a `cpu_boost(iterations)`
+  or `cpu_boost(Duration)` helper — since tprobe already
+  owns the measurement primitives and warmup is a
+  sibling concern. Tracked in `notes/todo.md`.
+
 ## Future work: linkme/inventory benchmark harness
 
 Idea captured during `0.3.0-0`; not scheduled for
