@@ -1863,6 +1863,102 @@ measures exactly the same work, probe-free.
   - Each reviewable on its own.
   - A single-step `0.5.0` would be a large diff to review in one pass.
 
+## Pool + PooledMsg (0.5.0-1)
+
+Implements the fixed-capacity buffer pool that `RuntimeZC`
+will use to ship zerocopy messages between actors. The
+shipped shape deviates from the `0.5.0-0` plan in several
+ways — all decided during review of successive design cuts:
+
+- Constructor takes explicit byte / count: `Pool::new(msg_size: u32, msg_count: u32)`. Pre-allocates `msg_count` buffers of `msg_size` bytes each; no lazy growth, no global `MAX_SIZE` const.
+- `get_msg` returns `Result<PooledMsg<S>, PoolError>` rather than panicking. Two variants: `SizeTooLarge { requested, max }` and `NoMsgs`.
+- Buffers are `Box<[u8]>` (fixed-size allocation) plus a separate `len: usize` on `PooledMsg` for the logical message length, instead of `Vec<u8>`'s redundant `cap` field.
+- The free list lives behind a `BufRefStore` trait so different concurrency strategies (Mutex, lock-free queue, ring buffer, hand-rolled atomics, …) can be benchmarked against each other. The default is `MutexLifo`.
+- `Pool` and `PooledMsg` are generic over `S: BufRefStore`, with `MutexLifo` as the default type — ordinary call sites write `Pool::new(64, 128)` unchanged.
+- A `BufRef` type alias documents the `Option<Box<[u8]>>` niche-optimization idiom in one place.
+
+### File-by-file
+
+- `crates/actor-x1/Cargo.toml`: `0.5.0-0` → `0.5.0-1`.
+- `crates/actor-x1/src/lib.rs`: `pub mod pool;` added before `pub mod runtime;`.
+- `crates/actor-x1/src/pool.rs`: new module.
+  - `pub type BufRef = Option<Box<[u8]>>;` — module-level alias documenting the niche-optimized "null or non-null pointer" pattern.
+  - `pub enum PoolError { SizeTooLarge { requested, max }, NoMsgs }` — `Display` + `std::error::Error` impls.
+  - `pub trait BufRefStore: Send + Sync` — `from_buffers`, `get`, `ret`, `len`, `size`, `is_empty` (default-impl over `len`).
+  - `pub struct MutexLifo` — initial impl: `Mutex<Vec<Box<[u8]>>>` + cached `size: usize` for O(1) lock-free `size()`.
+  - `pub struct Pool<S: BufRefStore = MutexLifo>` — `Arc<PoolInner<S>>` handle; manual `Clone` impl avoids spurious `S: Clone` bound.
+    - `Pool::new(msg_size: u32, msg_count: u32)` — allocates buffers, calls `S::from_buffers`.
+    - `Pool::msg_size() -> u32` — bytes per buffer.
+    - `Pool::size() -> usize` — total buffer capacity (delegates to the store; will sum across sub-stores once multi-size pools land).
+    - `Pool::get_msg(size: usize) -> Result<PooledMsg<S>, PoolError>` — validates `size`, pops via `S::get`, returns the wrapped buffer.
+    - `Pool::free_len()` — `#[cfg(test)]` only.
+  - `pub struct PooledMsg<S: BufRefStore = MutexLifo>` — `{ buf: BufRef, len: usize, pool: Arc<PoolInner<S>> }`.
+    - `Deref<Target=[u8]>` / `DerefMut` — slice the underlying `Box<[u8]>` to `[..len]`.
+    - `Drop` — `S::ret(self.buf.take().unwrap())` returns the buffer to the store.
+
+### Tests added (all `#[cfg(test)]` in `pool.rs`, 15 total)
+
+- `new_reports_msg_size_and_size` — fresh pool reports `msg_size`, `size`, and free-list `len`.
+- `pool_size_is_constant_and_matches_store` — `size()` stays at `msg_count` while in-flight buffers reduce `len()`.
+- `get_msg_returns_requested_size` — `len()` of the returned slice matches the requested size.
+- `get_msg_at_msg_size_ok` — `size == msg_size` boundary works.
+- `get_msg_zero_size_ok` — `size == 0` yields an empty slice.
+- `get_msg_over_msg_size_returns_size_too_large` — error carries `requested` + `max` correctly.
+- `get_msg_on_exhaustion_returns_no_msgs` — after all slots are in flight, `get_msg` yields `NoMsgs`.
+- `zero_count_pool_always_no_msgs` — `Pool::new(_, 0)` always errors; sanity check for the zero edge.
+- `drop_restores_slot_and_get_succeeds` — dropping an in-flight msg re-opens a slot.
+- `buffer_is_reused_across_get_drop_get` — pointer equality survives a get / drop / get cycle (LIFO, no realloc).
+- `clone_pool_shares_free_list` — drop on one `Pool` clone is visible from another.
+- `writes_round_trip` — `DerefMut` writes are visible through `Deref`.
+- `pool_works_across_threads` — `Pool` cloned to a worker thread; buffer dropped on worker returns to the shared free list.
+- `pool_error_display` — both variants render readable one-liners.
+- `mutex_lifo_trait_contract` — `BufRefStore` contract direct on `MutexLifo` without a `Pool` wrapper: `from_buffers` / `get` / `ret` / `len` / `size` round-trip end-to-end.
+
+### Design decisions recorded here
+
+- `BufRefStore` trait + generic `Pool<S>` rather than a hardcoded backend.
+  - Primary motivation: the user wants to swap concurrency strategies and benchmark them — Mutex baseline today, lock-free `ArrayQueue`, ring buffers, hand-rolled atomics later.
+  - Generic-with-default (`S: BufRefStore = MutexLifo`) keeps the common call site unchanged (`Pool::new(64, 128)`) while letting benchmarks opt into other backends with `Pool::<X>::new(64, 128)`.
+  - Trait surface stays minimal: `from_buffers` / `get` / `ret` / `len` / `size`. No "ordering" or "is_lockfree" methods; ordering is implementation-defined and `Pool` treats buffers as fungible.
+  - Dyn-dispatch via `Box<dyn BufRefStore>` was considered and rejected for benchmark fidelity — a `dyn` indirection in the hot path would contaminate the very thing we're trying to compare.
+- `BufRef = Option<Box<[u8]>>` alias.
+  - Documents the "safe null/non-null pointer" idiom in one place rather than re-explaining at each use site.
+  - Used in `PooledMsg.buf` (nullable transiently during `Drop::drop`) and as `BufRefStore::get`'s return (signaling empty store).
+- Fixed-capacity pre-allocation rather than lazy growth.
+  - Supersedes the `0.5.0-0` plan's "starts empty, grows on demand" design.
+  - Makes `NoMsgs` a real, testable condition — back-pressure is exposed instead of hidden behind silent allocation.
+  - Steady-state behavior for ping-pong is unchanged (two buffers cycling).
+- `Result<PooledMsg, PoolError>` rather than panic on misuse.
+  - Supersedes the `0.5.0-0` plan's panic on `size > MAX_SIZE`.
+  - `NoMsgs` is a runtime condition; a benchmark hitting exhaustion should not crash, it should report saturation.
+  - `SizeTooLarge` follows the same shape for one error path.
+- `Box<[u8]>` + separate `len` rather than `Vec<u8>`.
+  - `Vec`'s `cap` field is dead weight when capacity is fixed at `msg_size`; `Box<[u8]>` is `(ptr, len)` only.
+  - `Vec` also implies "growable", which is misleading here.
+  - `len` lives on `PooledMsg` instead of in the store, so the store treats buffers as identical fixed-size allocations.
+- `Option<Box<[u8]>>` inside `PooledMsg` so `Drop` can move the inner `Box` out.
+  - Niche-optimized to a single pointer at runtime (no discriminant tag).
+  - `None` only observed transiently inside `Drop::drop`; `Deref` / `DerefMut` can't see it.
+  - `unsafe` alternatives (`ManuallyDrop` + a destructor) would shave the `unwrap`s but add unsafety; not worth it.
+- `BufRefStore::size()` returns the constant store capacity.
+  - Distinct from `len()` (current count), which fluctuates as buffers go in flight.
+  - Cached at `from_buffers` time so `MutexLifo::size()` is O(1) lock-free.
+  - Test `pool_size_is_constant_and_matches_store` validates the invariant.
+  - Future-proofs the multi-size sub-pool extension: `Pool::size()` already sums "across sub-stores" (one for now).
+- `msg_size` / `msg_count` typed as `u32`.
+  - Matches the user's requested shape: explicit byte-range and count limits at the type level.
+  - Internally converted to `usize` for `Vec` / slice APIs; widening on every platform actor-x1 targets.
+  - `get_msg(size: usize)` stays `usize` for clean interop with slice/`Vec` lengths; if `size > u32::MAX` the `SizeTooLarge` guard catches it.
+- `is_empty` as a default-impl trait method.
+  - Required by clippy's `len_without_is_empty` lint when a type / trait exposes `len()`.
+  - Default body `len() == 0` is correct for any conforming impl; concrete impls can override if they have a faster path.
+- No zeroing on drop.
+  - Slots `0..new_size` of a reused buffer carry residual bytes from the previous occupant.
+  - For ping-pong workloads the next consumer either overwrites or ignores those bytes — benign.
+  - Real applications crossing trust domains would need an explicit `zeroize`-on-drop step; documented in the module-level comment.
+- No `Default for Pool`.
+  - There's no sensible default for `msg_size` / `msg_count`; every caller has to choose.
+
 ## Future work: linkme/inventory benchmark harness
 
 Idea captured during `0.3.0-0`; not scheduled for
