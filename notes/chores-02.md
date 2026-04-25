@@ -258,6 +258,77 @@ In `runtime_zc::tests`:
 - Closure-based init for richer post-spawn / pre-warmup work (`init: FnOnce(&Mailboxes<S>)`) if a workload ever needs more than a static `initial_messages` list.
 - `add_with_factory` escape hatch if a `!Send`-during-construction actor type ever appears.
 
+## bin/goalzc (0.5.0-3)
+
+Adds the `goalzc` binary — two zerocopy ping-pong actors on
+their own threads, exchanging pool-backed `PooledMsg`s of
+configurable size. Mirrors `goal2`'s CLI shape and output;
+swaps in `RuntimeZC` + `ActorManager` + `Pool` for the
+unit-`Message` runtime, and adds `--size N` for payload-byte
+sweeping.
+
+### File-by-file
+
+- `crates/actor-x1/Cargo.toml`: `0.5.0-2` → `0.5.0-3`. No
+  `[[bin]]` entry needed — the file lives under `src/bin/`
+  and Cargo auto-discovers it.
+- `crates/actor-x1/src/bin/goalzc.rs`: new binary.
+  - `PingPongZC { peer_id }` actor — implements
+    `ActorZC<S>` for any `S: BufRefStore`. On each inbound
+    `&[u8]`, fabricates a same-sized reply via
+    `ctx.get_msg(msg.len())` and sends it to `peer_id`. The
+    inbound `PooledMsg` is dropped by the runtime after the
+    handler returns, returning its buffer to the pool — so
+    each dispatch costs one pool `get` + one pool `put`.
+  - `Cli` mirrors `goal2`'s flags (`duration_s` positional,
+    `--warmup`, `--ticks`, `--decimals`, `--pin`) and adds
+    `--size N` (`u32`, default 64).
+  - `parse_positive_size` value parser rejects `0`. The
+    upper bound on `--size` is auto-satisfied:
+    `Pool::new(size, 4)` builds a pool whose `msg_size`
+    equals `--size`, so `get_msg(size)` always passes the
+    `SizeTooLarge` check inside the handler by construction.
+  - Pool sized at `Pool::new(cli.size, 4)` — 2 buffers in
+    flight for ping-pong steady state, plus 2-buffer headroom
+    so a wakeup race never starves.
+  - Runs `RuntimeZC::run` (probe-instrumented). Output line
+    adds `size=<N> B` next to the `2 actors, inner=1` summary.
+
+### Smoke results (1 s, --size 64)
+
+- `goalzc 1 --size 64`: 0.278 M msg/s.
+- `goal2 1 --pin 0,1`: 0.354 M msg/s.
+- Ratio ~0.79 — goalzc pays one pool `get` + one drop-back
+  per dispatch on top of goal2's unit-`Message` baseline.
+- The bot thinks the ~21% slowdown lines up with the per-
+  dispatch `MutexLifo` lock pair plus `Box<[u8]>` zero-init
+  on `get`; `goalzc-crit` (0.5.0-4) will refine the
+  comparison without probe contamination.
+
+### Design decisions recorded here
+
+- `--size` validated in the value parser, not after
+  `Pool::new`.
+  - Catches misuse (`--size 0`) before any runtime work
+    happens, with a clean clap error message.
+  - The hand-off note's "is `--size` ≤ `pool.msg_size()`?"
+    bound is satisfied by construction (`Pool::new(size, _)`
+    sets `msg_size == size`); no runtime check needed.
+- No `--pool-count` flag.
+  - Hard-coded `4` covers ping-pong (steady state 2) with
+    headroom. Future workloads with deeper queues will need
+    a knob; deferred.
+- `PingPongZC` is duplicated from `runtime_zc::tests::PingPong`
+  rather than promoted to a shared `pub` type.
+  - Both copies are five lines; the test version is intentionally
+    minimal so refactors of the test workload don't ripple into
+    the bin (and vice versa).
+  - Promotion to `crate::actors::PingPongZC` is a future tweak —
+    the noted choice in the hand-off section.
+- Output format mirrors `goal2`'s exactly, plus `size=<N> B`.
+  - Keeps cross-binary comparison readable; same band-table
+    report shape for `tprobe` per actor.
+
 ## Hand-off — closing the 0.5.0 ladder (post 0.5.0-2)
 
 Picks up where 0.5.0-2 leaves off; captures the as-built

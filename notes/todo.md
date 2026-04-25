@@ -8,8 +8,8 @@ and reference links to more details.
 - goalzc + RuntimeZC: pooled zerocopy ping-pong (0.5.0) [[20]]
   - 0.5.0-0 plan marker — done
   - 0.5.0-1 `Pool` + `BufRefStore` + `MutexLifo` — done
-  - 0.5.0-2 `actor_manager.rs` (catalog) + `runtime_zc.rs` (transport) — done; awaiting commit
-  - 0.5.0-3 `bin/goalzc.rs` — pending
+  - 0.5.0-2 `actor_manager.rs` (catalog) + `runtime_zc.rs` (transport) — done
+  - 0.5.0-3 `bin/goalzc.rs` — done; awaiting commit
   - 0.5.0-4 `benches/goalzc-crit.rs` — pending
   - 0.5.0 close — pending
   - See [[21]] for as-built API surface, per-step starting points, and gotchas (canonical hand-off; supersedes the original `0.5.0-0` plan shape since `-1` and `-2` deviated from it)
