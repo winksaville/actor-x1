@@ -329,6 +329,72 @@ sweeping.
   - Keeps cross-binary comparison readable; same band-table
     report shape for `tprobe` per actor.
 
+## benches/goalzc-crit (0.5.0-4)
+
+Adds `goalzc-crit`, a criterion smoke bench for `goalzc`.
+Drives the same two-thread two-actor zerocopy ping-pong
+workload via `RuntimeZC::run_no_probe` so the measurement
+is probe-clean. Mirrors `goal2-crit`'s shape (`iter_custom`,
+fresh runtime per sample, scale to iters).
+
+Scope. `RuntimeZC` is structurally `goal2` with a swapped
+payload — same threads, same `mpsc`, same warmup / measure /
+shutdown flow — so the runtime style is already validated
+by `goal2-crit`. `goalzc-crit`'s job is regression insurance
+for the pool-backed payload path ("does it still spin up,
+send, and tear down?"), not fidelity-perfect agreement with
+the `goalzc` binary. The bench-vs-bin gap question gets
+answered for free when the lifecycle refactor lands (planned
+0.6.0): warmed long-lived threads + per-sample `run` window
+collapses the gap structurally.
+
+### File-by-file
+
+- `crates/actor-x1/Cargo.toml`: `0.5.0-3` → `0.5.0-4`; new
+  `[[bench]] name = "goalzc-crit", harness = false` entry.
+- `crates/actor-x1/benches/goalzc-crit.rs`: new bench.
+  - Bench-local `PingPongZC { peer_id }` actor — a copy of the
+    `goalzc` bin's actor. Same five-line `handle_message` body
+    (`get_msg(msg.len())` then `ctx.send`).
+  - `bench_goalzc` builds a fresh `Pool::new(64, 4)` /
+    `RuntimeZC` / `ActorManager` per `iter_custom` call,
+    seeds `actor 0`, runs 50 ms warmup + 100 ms measurement
+    via `run_no_probe`, sums per-actor counts, and scales the
+    reported duration to `measurement * iters / total_count`.
+  - `Throughput::Elements(1)` — criterion's throughput row
+    reads as msgs / s. Single fixed `SIZE = 64`; size-sweeping
+    is a future tweak.
+  - 10 s `measurement_time`, 50 samples — same dial as
+    `goal2-crit`.
+
+### Smoke results (`--size 64`, unpinned)
+
+- `goalzc-crit/pingpong`: median ~232 K msg/s, criterion CI
+  [222, 246] K msg/s. Spins up, ping-pongs, tears down across
+  50 samples without panic — that's the bar this bench is
+  meeting.
+
+### Design decisions recorded here
+
+- `RuntimeZC::run_no_probe`, not `run`.
+  - Direct lesson from `goal2-crit`'s probe contamination —
+    the probe-free path exists for exactly this caller.
+  - `run` would secretly measure `work + tprobe` instead of
+    `work` alone; numbers would be inflated and not
+    comparable to `goalzc`'s `adj mean min-p99`.
+- Single fixed `--size` (64) rather than a sweep.
+  - Matches `goal2-crit`'s "one workload, one number" shape.
+  - Sweeping sizes via `BenchmarkId` + `Throughput::Bytes(size)`
+    is a future tweak — useful once we have a reason to
+    compare per-byte throughput across sizes.
+- Bench-local `PingPongZC` instead of importing the bin's.
+  - The bin's actor is in `src/bin/goalzc.rs`; binaries
+    aren't importable as a library by other crate targets,
+    so a copy is the cleanest path.
+  - Five lines of duplication; the alternative
+    (`pub mod actors`) is the future tweak the hand-off
+    section flagged.
+
 ## Hand-off — closing the 0.5.0 ladder (post 0.5.0-2)
 
 Picks up where 0.5.0-2 leaves off; captures the as-built
