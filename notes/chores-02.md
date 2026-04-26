@@ -21,7 +21,7 @@ cast inside their handlers via the `zerocopy` crate if they
 want typed views. A companion `goalzc-crit` criterion bench
 measures exactly the same work, probe-free.
 
-### Shape
+### Shape goalzz + RunteimZC
 
 - `Pool` + `PooledMsg` — new `crates/actor-x1/src/pool.rs`.
   - Buffers are fixed-size (`MAX_SIZE`) `Vec<u8>` owned by `PooledMsg`.
@@ -47,7 +47,7 @@ measures exactly the same work, probe-free.
   - Reuses the `measurement * iters / total_count` scaling trick from `goal2-crit`.
   - `Throughput::Elements(1)`.
 
-### Multi-step ladder
+### Multi-step ladder goalzc + RuntimeZC
 
 - `0.5.0-0` — Plan marker.
   - Bump `actor-x1` to `0.5.0-0`.
@@ -409,9 +409,9 @@ session rather than the plan-marker shape.
 - `0.5.0-0` — plan marker. Done & committed.
 - `0.5.0-1` — `Pool` + `PooledMsg` + `BufRefStore` + `MutexLifo`. Done & committed.
 - `0.5.0-2` — `actor_manager.rs` (catalog + traits) + `runtime_zc.rs` (transport). Done; awaiting commit at hand-off time.
-- `0.5.0-3` — `bin/goalzc.rs`. Pending.
-- `0.5.0-4` — `benches/goalzc-crit.rs`. Pending.
-- `0.5.0` — closing marker. Pending.
+- `0.5.0-3` — `bin/goalzc.rs`. Done & committed.
+- `0.5.0-4` — `benches/goalzc-crit.rs`. Done & committed.
+- `0.5.0` — closing marker. See `## goalzc + RuntimeZC: pooled zerocopy ping-pong (0.5.0)` below.
 
 ### As-built API surface (deviations from `0.5.0-0` baked in)
 
@@ -477,3 +477,50 @@ session rather than the plan-marker shape.
 - **Bullet doc comments on `#[arg]` fields → reflowed to prose by clap unless `verbatim_doc_comment` is set.** See `vc-x1/src/init.rs` for worked examples; the CLAUDE.md "Writing style: prefer sub-bullets" section calls this out.
 - **Initial messages are the app's responsibility** — neither manager nor runtime stores them. `goalzc` / `goalzc-crit` build the seed `PooledMsg` from the same `pool` they pass to `RuntimeZC::new`.
 - **`PingPong` test struct**: lives in `runtime_zc::tests`. `goalzc` / `goalzc-crit` will need their own copy (it's small) or a shared `pub` version under `crate::actors` — leaving as a duplication choice for the next session.
+
+## goalzc + RuntimeZC: pooled zerocopy ping-pong (0.5.0)
+
+Closes the `0.5.0` ladder. The `-N` suffix drops; the workspace
+ships `Pool` / `ActorManager` / `RuntimeZC`, the `goalzc` bin,
+and the `goalzc-crit` smoke bench. No behavior change vs
+`0.5.0-4` — closing marker plus README refresh.
+
+- `crates/actor-x1/Cargo.toml`: `0.5.0-4` → `0.5.0`.
+- `crates/actor-x1/README.md`:
+  - Binaries: add `goalzc` (zerocopy, `--size N`).
+  - Benches: add `goalzc-crit`. Smoke scope; gap collapses
+    with the `0.6.0` lifecycle refactor.
+- `notes/todo.md`: collapse the In-Progress `0.5.0` ladder
+  entry into one `## Done` line with refs
+  `[[20]],[[21]],[[22]]`; `In Progress` becomes `(none)`.
+- `notes/chores-02.md`: this section.
+
+### The 0.5.0 ladder at a glance
+
+See the `(0.5.0-N)` sections earlier in this file —
+`-0` plan marker, `-1` `Pool`, `-2` `ActorManager` +
+`RuntimeZC`, `-3` `goalzc` bin, `-4` `goalzc-crit` bench.
+
+### What ships in 0.5.0
+
+- `Pool<S: BufRefStore>` — fixed-capacity `Box<[u8]>` pool,
+  default `S = MutexLifo`. `get_msg` returns
+  `Result<PooledMsg, PoolError>`; `Drop` returns the buffer.
+- `ActorManager<S>` — catalog of zerocopy actors. `add()`
+  returns the id; `take_actors()` drains for the runtime.
+- `RuntimeZC<S>` — multi-threaded transport. One thread per
+  actor, per-actor `mpsc`, warmup / measure / shutdown
+  lifecycle. Entry points: `run` (probe) and `run_no_probe`
+  (clean).
+- `goalzc` bin — two-thread zerocopy ping-pong, `--size N`
+  (default 64), mirrors `goal2`'s flags.
+- `goalzc-crit` bench — criterion smoke harness via
+  `run_no_probe`.
+
+### What's next
+
+- `0.6.0-0` — lifecycle refactor on `RuntimeZC`: split
+  `run` into `startup` / `run` / `teardown` so spawn /
+  warmup amortize across multiple `run` windows.
+- The bot thinks the split also closes the `goalzc` /
+  `goalzc-crit` ~17.5% gap as a side effect.

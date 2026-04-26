@@ -5,14 +5,7 @@ and reference links to more details.
 
 ## In Progress
 
-- goalzc + RuntimeZC: pooled zerocopy ping-pong (0.5.0) [[20]]
-  - 0.5.0-0 plan marker — done
-  - 0.5.0-1 `Pool` + `BufRefStore` + `MutexLifo` — done
-  - 0.5.0-2 `actor_manager.rs` (catalog) + `runtime_zc.rs` (transport) — done
-  - 0.5.0-3 `bin/goalzc.rs` — done
-  - 0.5.0-4 `benches/goalzc-crit.rs` — done
-  - 0.5.0 close — pending
-  - See [[21]] for as-built API surface, per-step starting points, and gotchas (canonical hand-off; supersedes the original `0.5.0-0` plan shape since `-1` and `-2` deviated from it)
+(none)
 
 ## Todo
 
@@ -101,6 +94,7 @@ and older `## Done` sections are moved to [done.md](done.md) to keep this file s
 - Band-table decimals: default + `-d` override (0.3.1) [[16]]
 - Comma-format summary counts (0.3.2) [[17]]
 - Criterion benchmarks for goal1/goal2 (0.4.0) [[19]]
+- goalzc + RuntimeZC: pooled zerocopy ping-pong (0.5.0) [[23]],[[20]],[[21]],[[22]]
 
 
 # References
@@ -126,3 +120,5 @@ and older `## Done` sections are moved to [done.md](done.md) to keep this file s
 [19]: chores-01.md#criterion-benchmarks-for-goal1goal2-040
 [20]: chores-02.md#goalzc--runtimezc-pooled-zerocopy-ping-pong--plan-marker-050-0
 [21]: chores-02.md#hand-off--closing-the-050-ladder-post-050-2
+[22]: chores-02.md#multi-step-ladder-goalzc--runtimezc
+[23]: chores-02.md#goalzc--runtimezc-pooled-zerocopy-ping-pong-050
