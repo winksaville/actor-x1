@@ -11,7 +11,7 @@
 //!
 //! - **Lifecycle (preferred, new in `0.6.0-1`)**: caller
 //!   composes [`RuntimeZC::startup`] →
-//!   [`Handle::run`] (any number of windows) →
+//!   [`Handle::run`] (any number of run windows) →
 //!   [`Handle::stop`]. `stop` returns the aggregate `u64`
 //!   message count across all actor threads. Probe-free;
 //!   diagnostic instrumentation will re-enter post-`0.6.0`
@@ -251,9 +251,9 @@ impl<S: BufRefStore + 'static> RuntimeZC<S> {
     /// returning a [`Handle`] that owns the actor mesh.
     ///
     /// - The caller drives the lifecycle from there:
-    ///   [`Handle::run`] sleeps a window (any number of
-    ///   times); [`Handle::stop`] sends `Shutdown`, joins,
-    ///   and returns the aggregate `u64` count.
+    ///   [`Handle::run`] sleeps a run window (any number
+    ///   of times); [`Handle::stop`] sends `Shutdown`,
+    ///   joins, and returns the aggregate `u64` count.
     /// - No probe support — counts only. Probing re-enters
     ///   post-`0.6.0` via an actor-wrapper trait or
     ///   `TProbe::Counter`.
@@ -280,7 +280,7 @@ impl<S: BufRefStore + 'static> RuntimeZC<S> {
 ///
 /// - Holds the per-actor senders and join handles plus a
 ///   clone of the runtime's pool.
-/// - [`Handle::run`] sleeps a window; actor threads continue
+/// - [`Handle::run`] sleeps a run window; actor threads continue
 ///   processing messages in the meantime. May be called any
 ///   number of times before `stop`.
 /// - [`Handle::stop`] sends `Shutdown` to every actor, joins
@@ -297,17 +297,35 @@ pub struct Handle<S: BufRefStore = MutexLifo> {
 }
 
 impl<S: BufRefStore> Handle<S> {
-    /// Sleep for `window`. Actor threads continue processing
-    /// messages while the caller sleeps; counts accumulate
-    /// in their per-thread local `u64`s.
-    pub fn run(&self, window: Duration) {
-        thread::sleep(window);
+    /// Sleep for `duration` (a run window). Actor threads
+    /// continue processing messages while the caller sleeps;
+    /// counts accumulate in their per-thread local `u64`s.
+    pub fn run(&self, duration: Duration) {
+        thread::sleep(duration);
     }
 
     /// Borrow the runtime's pool handle (for ad-hoc post-
     /// startup `get_msg` / inspection).
     pub fn pool(&self) -> &Pool<S> {
         &self.pool
+    }
+
+    /// Send `ClearProbe` to every actor thread; on receipt
+    /// each thread zeros its per-thread message count. Used
+    /// to mark the warmup → measurement boundary so
+    /// `stop`'s aggregate excludes warmup messages.
+    ///
+    /// - Caller-driven: not implicit. The lifecycle API has
+    ///   no built-in warmup phase.
+    /// - Best-effort: if a thread already exited, the send
+    ///   silently fails. The count of an exited thread is
+    ///   already captured in its `JoinHandle::Output`.
+    pub fn reset_count(&self) {
+        if let Some(senders) = self.senders.as_ref() {
+            for tx in senders {
+                let _ = tx.send(SignalZC::ClearProbe);
+            }
+        }
     }
 
     /// Send `Shutdown` to every actor, join all threads, and
@@ -568,9 +586,9 @@ mod tests {
         assert_eq!(rt.pool().size(), 2);
     }
 
-    /// Lifecycle round trip: `startup` → `run` (one window)
-    /// → `stop` returns the aggregate count and drains the
-    /// pool.
+    /// Lifecycle round trip: `startup` → `run` (one run
+    /// window) → `stop` returns the aggregate count and
+    /// drains the pool.
     #[test]
     fn lifecycle_round_trip_returns_total() {
         let pool: Pool = Pool::new(64, 4);
@@ -591,7 +609,7 @@ mod tests {
     }
 
     /// `Handle::run` may be called multiple times before
-    /// `stop`; the aggregate count covers all windows.
+    /// `stop`; the aggregate count covers all run windows.
     #[test]
     fn lifecycle_multiple_run_windows_accumulate() {
         let pool: Pool = Pool::new(64, 4);
@@ -623,6 +641,31 @@ mod tests {
         assert_eq!(handle.pool().size(), 4);
         handle.run(Duration::from_millis(20));
         let _ = handle.stop();
+    }
+
+    /// `reset_count` zeros each actor thread's per-thread
+    /// count at the warmup → measurement boundary. Smoke
+    /// test: runtime stays healthy (drains, returns nonzero
+    /// total for the post-reset run window).
+    #[test]
+    fn lifecycle_reset_count_runs_clean() {
+        let pool: Pool = Pool::new(64, 4);
+        let mut rt = RuntimeZC::new(pool.clone());
+        let mut mgr = ActorManager::new("test.reset");
+        let a = mgr.add(PingPong { peer: 1 });
+        let _b = mgr.add(PingPong { peer: 0 });
+        let initial = vec![(a, pool.get_msg(8).expect("seed"))];
+        let handle = rt.startup(&mut mgr, initial, &[]);
+        handle.run(Duration::from_millis(20));
+        handle.reset_count();
+        handle.run(Duration::from_millis(20));
+        let total = handle.stop();
+        assert!(total > 0, "expected nonzero total post-reset, got {total}");
+        assert_eq!(
+            pool.free_len(),
+            pool.size(),
+            "all buffers should return to pool after stop"
+        );
     }
 
     /// Dropping `Handle` without calling `stop` performs a

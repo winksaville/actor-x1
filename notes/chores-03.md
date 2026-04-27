@@ -17,22 +17,38 @@ typed-message-to-runtime story.
 
 ```
 let handle = rt.startup(&mut mgr, initial, pin_cores);
-handle.run(window);          // optional, repeatable
+handle.run(duration);        // optional, repeatable
 let total = handle.stop();   // u64 aggregate; sends Shutdown
 ```
 
 ### Multi-step ladder
+
+(Revised mid-flight after `0.6.0-1`. Original ladder had
+three sub-steps; expanded to five to make the trait
+introduction and amortized-bench work explicit.)
 
 - `0.6.0-0` — plan marker (this section + version bump).
 - `0.6.0-1` — `Handle` + `RuntimeZC::startup` /
   `Handle::run` / `Handle::stop`; tests updated. Existing
   `run` / `run_probed` stay alongside (additive step).
 - `0.6.0-2` — Migrate `goalzc` bin and `goalzc-crit` bench
-  to the lifecycle API. `goalzc` loses its band-table
-  (no probing); keeps the msg/s line as a smoke generator.
-  `goalzc-crit` keeps the current cycle-per-sample shape,
-  just through the new API.
-- `0.6.0-3` — Remove `RuntimeZC::run` / `run_probed` and
+  to the lifecycle API. New `Handle::reset_count` (sends
+  `ClearProbe`; each actor thread zeros its per-thread
+  count on receipt). `--warmup` restored on `goalzc` and
+  in `goalzc-crit`'s warmup → measurement split. `goalzc`
+  loses its band-table (no probing); keeps the msg/s line
+  as a smoke generator.
+- `0.6.0-3` — `Handle::query_count` via signal-and-reply
+  (oneshot per thread). `goalzc-crit` goes amortized:
+  `startup` once / `reset_count → run(duration) →
+  query_count` per criterion sample. Reports the new
+  amortized number; bench-vs-bin gap collapses (or
+  doesn't, and we learn something).
+- `0.6.0-4` — Introduce `Runtime` trait. `RuntimeZC` impls
+  it. `goalzc` / `goalzc-crit` / tests reach through the
+  trait, not the concrete type. `SignalZC::ClearProbe`
+  renamed to `ClearCount` (probe is gone).
+- `0.6.0-5` — Remove legacy `run` / `run_probed` /
   `actor_loop_probed`. Runtime is probe-free +
   lifecycle-only.
 - `0.6.0` — close.
@@ -43,22 +59,35 @@ let total = handle.stop();   // u64 aggregate; sends Shutdown
   via `JoinHandle` at `stop`. `stop -> u64` aggregate. KIS;
   per-actor breakdown is a future `TProbe::Counter`
   concern.
-- **`Handle::run(window) -> ()`** — just sleeps the window.
-  Counts not readable mid-flight by design.
+- **`Handle::run(duration) -> ()`** — just sleeps for the
+  run window. Counts not readable mid-flight by design.
 - **`Handle::Drop`** calls `stop` if forgotten; result is
   discarded. Join errors are swallowed (drop must not
   panic-during-drop).
 - **Probing leaves the runtime.** `goalzc`'s band-table
   goes with it. Probe re-introduction is post-`0.6.0`
   work, via `TProbe::Counter` or an actor-wrapper trait.
-- **Methods on `RuntimeZC`**, not a trait. Trait when a
-  second runtime impl appears.
+- **`Runtime` trait** introduced in `0.6.0-4`. Consumers
+  reach through the trait so the post-`0.6.0`
+  ActorManager-driven graceful shutdown work has a clean
+  seam to drop into.
 
 ### Defaults that aren't yet locked
 
 - `Handle::pool()` accessor so the caller can inject ad-hoc
   messages post-startup. Default yes; revisit during
   `0.6.0-1` if the API gets ugly.
+
+### Naming: teardown → stop
+
+The `0.5.0` close section's "What's next" pointer used
+the name `teardown` for the lifecycle's shutdown
+primitive. During the `0.6.0-0` planning round the name
+settled on `stop` — matches the post-`0.6.0` typed-
+message-to-runtime story. The chores-02 mention of
+`teardown` is historical (accurate to the moment it was
+written, pre-rename) and is left in place per the same
+precedent `0.5.1` set with `run_no_probe → run`.
 
 ## Handle + RuntimeZC::startup / Handle::run / Handle::stop (0.6.0-1)
 
@@ -135,3 +164,100 @@ they go away in `0.6.0-3`.
 - Legacy `RuntimeZC::run` / `run_probed` /
   `actor_loop_probed` / the `ClearProbe` signal path stay
   untouched for now. `0.6.0-3` removes them.
+
+## Migrate goalzc bin and goalzc-crit bench to lifecycle (0.6.0-2)
+
+`goalzc` and `goalzc-crit` move off the legacy all-in-one
+`RuntimeZC::run_probed` / `run` to the lifecycle API
+(`startup` / `Handle::run` / `Handle::stop`). Adds
+`Handle::reset_count` so the warmup → measurement
+boundary can zero per-thread counts mid-flight. `goalzc`
+loses its band-table report (no probing in the runtime;
+re-enters post-`0.6.0`) and becomes a smoke generator
+that prints msg/s. `goalzc-crit` keeps its
+cycle-per-sample shape, just through the new API.
+
+- `crates/actor-x1/Cargo.toml`: `0.6.0-1` → `0.6.0-2`.
+- `crates/actor-x1/src/runtime_zc.rs`:
+  - New `pub fn Handle::reset_count(&self)` sends
+    `SignalZC::ClearProbe` to every actor thread; on
+    receipt each thread zeros its per-thread count.
+    Best-effort: if a thread already exited, the send
+    silently fails (its count is already captured in
+    its `JoinHandle::Output`).
+  - New test `lifecycle_reset_count_runs_clean` exercises
+    `startup → run → reset_count → run → stop`; asserts
+    nonzero post-reset total + drain invariant.
+- `crates/actor-x1/src/bin/goalzc.rs`:
+  - CLI: drop `--ticks` (`-t`), `--decimals` (`-d`).
+    Keep `duration_s` (positional), `--warmup` (`-w`,
+    default 0.5), `--size` (`-s`), `--pin` (`-p`).
+  - Drop the apparatus calibration call and the
+    per-thread `tprobe` band-table report.
+  - Use `rt.startup` → `handle.run(warmup)` →
+    `handle.reset_count()` → `handle.run(measurement)`
+    → `handle.stop` to drive the actors.
+  - Output: version banner, throughput line
+    (`goalzc: <count> messages in <Ds> (<R> M msg/s,
+    <N> actors, size=<S> B)`), and `pinning:` line if
+    `--pin` was set. No `apparatus:` line, no band
+    table.
+  - Imports trimmed: `tprobe::{fmt_commas, pin}` only
+    (was `tprobe::{self as perf, fmt_commas, pin,
+    ticks}` plus probe-side report calls).
+  - `n_actors = 2` hardcoded since the bin always
+    creates two actors (assertion already pins
+    `(a_id, b_id) == (0, 1)`).
+- `crates/actor-x1/benches/goalzc-crit.rs`:
+  - Switch `rt.run` → `rt.startup` /
+    `handle.run(warmup)` / `handle.reset_count()` /
+    `handle.run(measurement)` / `handle.stop`.
+  - Keep the prior 50 ms warmup + 100 ms measurement
+    split. `per_msg_ns = measurement / measurement_count`
+    (post-reset only).
+  - Module docstring rewritten around the lifecycle
+    API and the smoke-bench scope.
+- `notes/todo.md`: mark `0.6.0-2` done.
+- `notes/chores-03.md`: this section.
+
+### Smoke results (`--size 64`, unpinned)
+
+- `goalzc-crit/pingpong`: ~260 K msg/s (criterion CI
+  [250, 269] K elem/s; "Performance has improved",
+  p=0.04 vs the pre-restoration single-window baseline
+  at ~233 K). Restoring `--warmup` (50 ms) before the
+  100 ms measurement window — and using `reset_count`
+  to drop the warmup count — exposes the steady-state
+  rate.
+- `goalzc 10 -w 3`: ~293 K msg/s. Modest improvement vs
+  the pre-`0.6.0` probed path (~281 K); the bot thinks
+  this is the probe overhead leaving the hot loop —
+  ~5.8 ns / dispatch ≈ 0.17% of the per-message cost —
+  near the edge of run-to-run noise but pointing the
+  right way.
+- Bench-vs-bin ratio: 260 / 293 ≈ 0.89, narrower than
+  the pre-restoration 232 / 281 ≈ 0.83. The remaining
+  11% is the per-sample fresh-`startup` cost in the
+  bench; `0.6.0-3`'s `startup`-once + `query_count`
+  amortization aims at that.
+
+### CLI breaking change in 0.6.0-2
+
+`goalzc`'s `--ticks` / `--decimals` flags are gone (band-
+table is gone). `--warmup` is preserved with the same
+semantics it had pre-`0.6.0`: warmup window precedes
+measurement, and reported throughput reflects only the
+measurement window.
+
+### Naming: window → duration
+
+`Handle::run`'s parameter `window: Duration` renamed to
+`duration: Duration` — matches `std::thread::sleep(dur)`
+and `tokio::time::sleep(duration)` conventions, removes
+the overloaded "window" reading from the public API. In
+prose, bare "window" becomes "run window"; "warmup
+window" / "measurement window" stay as already-qualified
+compound terms. The `0.6.0-1` chores section above
+describes the parameter as `window: Duration`, accurate
+at the time, left in place per the same precedent
+`0.5.1` set with `run_no_probe → run`.

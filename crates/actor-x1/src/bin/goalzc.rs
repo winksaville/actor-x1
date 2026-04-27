@@ -1,15 +1,20 @@
 //! Goalzc binary: two zerocopy actors, each on its own thread,
 //! ping-ponging a pool-backed `PooledMsg` (handler view: `&[u8]`)
-//! over `std::sync::mpsc` channels for a caller-supplied duration
-//! in seconds, after an optional warmup. Prints messages-handled
-//! / throughput, an apparatus-overhead diagnostic, and a `tprobe`
-//! band-table report per actor.
+//! over `std::sync::mpsc` channels for a caller-supplied
+//! duration in seconds, after an optional warmup window.
+//! Smoke generator for the pool-backed payload path: prints
+//! messages-handled / aggregate throughput plus the `pinning:`
+//! line if `--pin` was set.
+//!
+//! No diagnostic instrumentation in this version. Probing
+//! re-enters post-`0.6.0` via an actor-wrapper trait or
+//! `TProbe::Counter` (out of scope here).
 //!
 //! Compared to goal2 (unit `Message`), goalzc exercises the
 //! `Pool` + `PooledMsg` path: every dispatch costs one `pool.get`
 //! plus one drop-back. `--size N` sweeps payload size; pool is
 //! sized for ping-pong steady state (2 buffers in flight) with
-//! a small headroom (4 buffers) so a wakeup race never starves.
+//! headroom (4 buffers) so a wakeup race never starves.
 //!
 //! Usage: `goalzc --help`
 
@@ -19,7 +24,7 @@ use actor_x1::actor_manager::{ActorManager, ActorZC, ContextZC};
 use actor_x1::pool::{BufRefStore, Pool};
 use actor_x1::runtime_zc::RuntimeZC;
 use clap::Parser;
-use tprobe::{self as perf, fmt_commas, pin, ticks};
+use tprobe::{fmt_commas, pin};
 
 /// Zerocopy ping-pong actor: on every inbound message, fabricate
 /// a reply of the same length from the pool and forward it to
@@ -39,9 +44,8 @@ impl<S: BufRefStore> ActorZC<S> for PingPongZC {
     }
 }
 
-/// CLI for goalzc: two-thread two-actor zerocopy ping-pong with
-/// warmup, per-dispatch probe, apparatus-overhead subtraction,
-/// and ns-or-ticks band-table report per actor.
+/// CLI for goalzc: two-thread two-actor zerocopy ping-pong
+/// smoke generator. Reports aggregate throughput.
 #[derive(Parser, Debug)]
 #[command(
     version,
@@ -55,11 +59,11 @@ struct Cli {
     #[arg(value_parser = parse_non_negative_secs)]
     duration_s: f64,
 
-    /// Warmup duration in seconds before measurement. Runs the
-    /// same dispatch loop as the measurement phase (probe active)
-    /// so cache / branch-predictor / frequency land in the same
-    /// state by the time the probe is cleared and measurement
-    /// begins.
+    /// Warmup duration in seconds before measurement. Runs
+    /// the same dispatch loop; per-thread counts are zeroed
+    /// at the warmup → measurement boundary via
+    /// `Handle::reset_count` so reported throughput reflects
+    /// only the measurement window.
     #[arg(short = 'w', long, default_value_t = 0.5, value_parser = parse_non_negative_secs)]
     warmup: f64,
 
@@ -69,17 +73,6 @@ struct Cli {
     /// `>= 1`.
     #[arg(short = 's', long, default_value_t = 64, value_parser = parse_positive_size)]
     size: u32,
-
-    /// Display probe values as raw ticks instead of nanoseconds.
-    #[arg(short = 't', long)]
-    ticks: bool,
-
-    /// Fractional precision of numeric cells in the band table.
-    /// Omit for a mode-aware default (0 for ticks, 1 for ns) —
-    /// typically what you want. Pass an integer N to force N
-    /// decimals in either mode.
-    #[arg(short = 'd', long)]
-    decimals: Option<usize>,
 
     /// Pin each actor thread to a logical CPU. Accepts a
     /// comma-separated / range list; actor `i` pins to
@@ -115,17 +108,11 @@ fn parse_positive_size(s: &str) -> Result<u32, String> {
     }
 }
 
-/// Parse CLI, calibrate apparatus, run two zerocopy ping-pong
-/// actors on their own threads, print summary and per-actor
-/// `tprobe` band-table reports.
+/// Parse CLI, run two zerocopy ping-pong actors on their own
+/// threads via the lifecycle API, print aggregate throughput.
 fn main() {
     let cli = Cli::parse();
     println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"),);
-
-    // Calibrate on main thread before spawning. Matches goal2's
-    // path; actor threads share the same CPU microarchitecture
-    // so a single Overhead is good enough.
-    let overhead = perf::calibrate();
 
     // Pool sized for ping-pong steady state (2 in flight) with
     // headroom; `Pool::new(size, 4)` makes the `--size` runtime
@@ -142,8 +129,6 @@ fn main() {
         pool.get_msg(cli.size as usize).expect("seed get_msg"), // OK: fresh pool with capacity 4 satisfies a single get
     )];
 
-    let warmup = Duration::from_secs_f64(cli.warmup);
-    let measurement = Duration::from_secs_f64(cli.duration_s);
     let pin_cores: Vec<usize> = match cli.pin.as_deref() {
         None => vec![],
         Some(spec) => match pin::parse_cores(spec) {
@@ -154,44 +139,27 @@ fn main() {
             }
         },
     };
-    let results = rt.run_probed(&mut mgr, initial, warmup, measurement, &pin_cores);
 
-    let total_count: u64 = results.iter().map(|(c, _)| *c).sum();
+    let n_actors = 2;
+    let handle = rt.startup(&mut mgr, initial, &pin_cores);
+    handle.run(Duration::from_secs_f64(cli.warmup));
+    handle.reset_count();
+    handle.run(Duration::from_secs_f64(cli.duration_s));
+    let total_count = handle.stop();
+
     let mmps = total_count as f64 / cli.duration_s / 1e6;
     println!(
-        "goalzc: {} messages in {:.3}s ({mmps:.3} M msg/s, {n} actors, size={size} B, inner=1)",
+        "goalzc: {} messages in {:.3}s ({mmps:.3} M msg/s, {n_actors} actors, size={size} B)",
         fmt_commas(total_count),
         cli.duration_s,
-        n = results.len(),
         size = cli.size,
-    );
-    let tpn = ticks::ticks_per_ns();
-    let framing_ns = overhead.framing_ticks as f64 / tpn;
-    let lpi_ns = overhead.loop_per_iter_ticks / tpn;
-    let per_event_tk = overhead.per_event_ticks(1);
-    let per_event_ns = per_event_tk as f64 / tpn;
-    println!(
-        "  apparatus: framing={} tk ({:.2} ns); loop_per_iter={:.2} tk ({:.2} ns); per-event at inner=1 = {} tk ({:.2} ns)",
-        overhead.framing_ticks,
-        framing_ns,
-        overhead.loop_per_iter_ticks,
-        lpi_ns,
-        per_event_tk,
-        per_event_ns,
     );
     if pin_cores.is_empty() {
         println!("  pinning: none (unpinned)");
     } else {
-        let n = results.len();
-        let plan: Vec<String> = (0..n)
+        let plan: Vec<String> = (0..n_actors)
             .map(|i| format!("actor{i}→core{}", pin_cores[i % pin_cores.len()]))
             .collect();
         println!("  pinning: {}", plan.join(", "));
-    }
-    println!();
-
-    for (i, (count, mut probe)) in results.into_iter().enumerate() {
-        println!("  actor {i}: handled {} messages", fmt_commas(count));
-        probe.report(cli.ticks, Some(&overhead), cli.decimals);
     }
 }
