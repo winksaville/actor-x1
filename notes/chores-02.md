@@ -524,3 +524,48 @@ See the `(0.5.0-N)` sections earlier in this file —
   warmup amortize across multiple `run` windows.
 - The bot thinks the split also closes the `goalzc` /
   `goalzc-crit` ~17.5% gap as a side effect.
+
+## Rename run_no_probe → run, run → run_probed (0.5.1)
+
+Mechanical rename + version bump. No behavior change.
+Probe-clean becomes the default measurement primitive;
+probe instrumentation becomes the explicit opt-in. Frees
+the `run` name for the narrower "process for a window"
+meaning it'll take in the planned `0.6.0` lifecycle split.
+
+- `crates/actor-x1/Cargo.toml`: `0.5.0` → `0.5.1`.
+- `crates/actor-x1/src/runtime_zc.rs`:
+  - Public: `run_no_probe` → `run`; `run` → `run_probed`.
+  - Internal: `actor_loop_no_probe` → `actor_loop`;
+    `actor_loop_probe` → `actor_loop_probed`.
+  - Module-level docstring rewritten around the new names.
+  - Tests: `run_no_probe_returns_counts` →
+    `run_returns_counts`; `ping_pong_runs_and_shuts_down`
+    and `pool_is_full_after_shutdown` switch to
+    `rt.run_probed(...)` (they exercise the probe path).
+- `crates/actor-x1/src/bin/goalzc.rs`: `rt.run(...)` →
+  `rt.run_probed(...)`.
+- `crates/actor-x1/benches/goalzc-crit.rs`:
+  `rt.run_no_probe(...)` → `rt.run(...)`; module docstring
+  updated.
+- `crates/actor-x1/README.md`: Benches description for
+  `goalzc-crit` updated to mention `RuntimeZC::run`
+  (probe-free default).
+- `notes/todo.md`: Done entry + `[24]` ref.
+- `notes/chores-02.md`: this section.
+
+### Rationale
+
+- Probe-clean is the default measurement primitive — what
+  benches and any future production-shaped consumer want.
+  Naming it `run` matches that.
+- Probe instrumentation is opt-in for diagnostic work — the
+  `goalzc` band-table report path. Naming it `run_probed`
+  marks the trade explicitly.
+- Reads better at call sites: `rt.run(...)` for normal use,
+  `rt.run_probed(...)` when you want the histogram. The
+  previous pairing inverted the more common case.
+- Earlier chores entries (`0.5.0-2` "As-built API surface",
+  `0.5.0-4` "Use run_no_probe, not run") still describe the
+  pre-rename API correctly for their version; they're not
+  rewritten.

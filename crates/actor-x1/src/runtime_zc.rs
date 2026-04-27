@@ -21,13 +21,15 @@
 //!
 //! Two run entry points on [`RuntimeZC`]:
 //!
-//! - [`RuntimeZC::run`] — `tprobe`-instrumented; returns
-//!   `(count, TProbe)` per actor. Used by the `goalzc` binary.
-//! - [`RuntimeZC::run_no_probe`] — probe-free; returns `count`
-//!   per actor. Used by the `goalzc-crit` criterion bench so
-//!   measurement is not contaminated by probe overhead.
+//! - [`RuntimeZC::run`] — probe-free; returns `count` per
+//!   actor. The default measurement primitive (used by the
+//!   `goalzc-crit` criterion bench so measurement is not
+//!   contaminated by probe overhead).
+//! - [`RuntimeZC::run_probed`] — `tprobe`-instrumented;
+//!   returns `(count, TProbe)` per actor. Opt-in for
+//!   diagnostic instrumentation (used by the `goalzc` binary).
 //!
-//! Lifecycle inside `run` / `run_no_probe`:
+//! Lifecycle inside `run` / `run_probed`:
 //!
 //! - Drain actors from the Manager.
 //! - Build per-actor channels.
@@ -97,42 +99,18 @@ impl<S: BufRefStore + 'static> RuntimeZC<S> {
         &self.pool
     }
 
-    /// Drain the manager's actors, run with `tprobe`
-    /// instrumentation.
+    /// Drain the manager's actors and run with no probe
+    /// instrumentation. The default measurement primitive.
     ///
-    /// - Each actor thread owns a [`TProbe`] recording per-
-    ///   `handle_message` latency at `inner=1`.
     /// - `initial_messages` are delivered after thread spawn,
     ///   before warmup.
-    /// - Returns `(count, probe)` per actor in id order.
-    pub fn run(
-        &mut self,
-        mgr: &mut ActorManager<S>,
-        initial_messages: Vec<(u32, PooledMsg<S>)>,
-        warmup: Duration,
-        measurement: Duration,
-        pin_cores: &[usize],
-    ) -> Vec<(u64, TProbe)> {
-        self.run_inner(
-            mgr,
-            initial_messages,
-            warmup,
-            measurement,
-            pin_cores,
-            actor_loop_probe::<S>,
-        )
-    }
-
-    /// Same orchestration as [`RuntimeZC::run`], minus the
-    /// per-message `TProbe` calls in the hot loop.
-    ///
+    /// - Returns per-actor `count` in id order.
     /// - Used by the `goalzc-crit` criterion bench so the
-    ///   measurement is probe-clean.
-    /// - The lesson learned from `goal2-crit`'s probe
-    ///   contamination: keeping a probe-free path on the
-    ///   runtime from the start avoids the trap of a bench
-    ///   that secretly measures `work + tprobe`.
-    pub fn run_no_probe(
+    ///   measurement is probe-clean. The lesson learned from
+    ///   `goal2-crit`'s probe contamination: keeping a probe-
+    ///   free path on the runtime from the start avoids the
+    ///   trap of a bench that secretly measures `work + tprobe`.
+    pub fn run(
         &mut self,
         mgr: &mut ActorManager<S>,
         initial_messages: Vec<(u32, PooledMsg<S>)>,
@@ -146,7 +124,34 @@ impl<S: BufRefStore + 'static> RuntimeZC<S> {
             warmup,
             measurement,
             pin_cores,
-            actor_loop_no_probe::<S>,
+            actor_loop::<S>,
+        )
+    }
+
+    /// Same orchestration as [`RuntimeZC::run`], plus a
+    /// per-message [`TProbe`] in the hot loop.
+    ///
+    /// - Each actor thread owns a `TProbe` recording per-
+    ///   `handle_message` latency at `inner=1`.
+    /// - Returns `(count, probe)` per actor in id order.
+    /// - Used by the `goalzc` binary's diagnostic report.
+    ///   Avoid in benches: probe overhead contaminates the
+    ///   measurement.
+    pub fn run_probed(
+        &mut self,
+        mgr: &mut ActorManager<S>,
+        initial_messages: Vec<(u32, PooledMsg<S>)>,
+        warmup: Duration,
+        measurement: Duration,
+        pin_cores: &[usize],
+    ) -> Vec<(u64, TProbe)> {
+        self.run_inner(
+            mgr,
+            initial_messages,
+            warmup,
+            measurement,
+            pin_cores,
+            actor_loop_probed::<S>,
         )
     }
 
@@ -274,7 +279,7 @@ impl<S: BufRefStore> ContextZC<S> for MultiCtxZC<'_, S> {
 /// - `Signal::User` records.
 /// - `Signal::ClearProbe` resets probe + count.
 /// - `Signal::Shutdown` (or closed channel) exits.
-fn actor_loop_probe<S: BufRefStore + 'static>(
+fn actor_loop_probed<S: BufRefStore + 'static>(
     mut actor: Box<dyn ActorZC<S> + Send>,
     rx: Receiver<SignalZC<S>>,
     peers: Vec<Sender<SignalZC<S>>>,
@@ -308,12 +313,12 @@ fn actor_loop_probe<S: BufRefStore + 'static>(
 
 /// Per-thread loop with no probe involvement.
 ///
-/// - Identical to [`actor_loop_probe`] minus `probe.start` /
+/// - Identical to [`actor_loop_probed`] minus `probe.start` /
 ///   `probe.end` / `probe.clear`.
 /// - `_probe_name` is unused but kept in the signature so the
 ///   function pointer matches [`ActorLoopFn`] without
 ///   special-casing.
-fn actor_loop_no_probe<S: BufRefStore + 'static>(
+fn actor_loop<S: BufRefStore + 'static>(
     mut actor: Box<dyn ActorZC<S> + Send>,
     rx: Receiver<SignalZC<S>>,
     peers: Vec<Sender<SignalZC<S>>>,
@@ -362,7 +367,8 @@ mod tests {
     }
 
     /// Two-actor ping-pong drives traffic and shuts down
-    /// cleanly; both actors record nonzero counts.
+    /// cleanly via the probe path; both actors record nonzero
+    /// counts.
     #[test]
     fn ping_pong_runs_and_shuts_down() {
         let pool: Pool = Pool::new(64, 4);
@@ -371,7 +377,7 @@ mod tests {
         let a = mgr.add(PingPong { peer: 1 });
         let _b = mgr.add(PingPong { peer: 0 });
         let initial = vec![(a, pool.get_msg(8).expect("seed"))];
-        let results = rt.run(
+        let results = rt.run_probed(
             &mut mgr,
             initial,
             Duration::from_millis(40),
@@ -383,7 +389,7 @@ mod tests {
         assert!(total > 0, "expected nonzero throughput, got count={total}");
     }
 
-    /// After `run` returns, every buffer the pool ever
+    /// After `run_probed` returns, every buffer the pool ever
     /// handed out has come back. Tests the drain story
     /// across the channel-close path.
     #[test]
@@ -394,7 +400,7 @@ mod tests {
         let a = mgr.add(PingPong { peer: 1 });
         let _b = mgr.add(PingPong { peer: 0 });
         let initial = vec![(a, pool.get_msg(8).expect("seed"))];
-        let _ = rt.run(
+        let _ = rt.run_probed(
             &mut mgr,
             initial,
             Duration::from_millis(20),
@@ -408,18 +414,18 @@ mod tests {
         );
     }
 
-    /// `run_no_probe` orchestrates identically and returns
-    /// per-actor counts (no probes). Validates that the
+    /// `run` (probe-free default) orchestrates identically
+    /// and returns per-actor counts. Validates that the
     /// probe-clean path runs the same workload.
     #[test]
-    fn run_no_probe_returns_counts() {
+    fn run_returns_counts() {
         let pool: Pool = Pool::new(64, 4);
         let mut rt = RuntimeZC::new(pool.clone());
         let mut mgr = ActorManager::new("test.np");
         let a = mgr.add(PingPong { peer: 1 });
         let _b = mgr.add(PingPong { peer: 0 });
         let initial = vec![(a, pool.get_msg(8).expect("seed"))];
-        let results = rt.run_no_probe(
+        let results = rt.run(
             &mut mgr,
             initial,
             Duration::from_millis(20),
@@ -432,7 +438,7 @@ mod tests {
         assert_eq!(
             pool.free_len(),
             pool.size(),
-            "all buffers should return to pool after no-probe shutdown"
+            "all buffers should return to pool after probe-free shutdown"
         );
     }
 

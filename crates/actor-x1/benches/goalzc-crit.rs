@@ -4,10 +4,11 @@
 //! workload the `goalzc` binary runs, via [`RuntimeZC`]. Invoked
 //! as `cargo bench --bench goalzc-crit` from `crates/actor-x1`.
 //!
-//! Uses [`RuntimeZC::run_no_probe`], not [`RuntimeZC::run`] — the
-//! lesson from `goal2-crit`'s probe contamination is the reason
-//! the probe-free path exists. Calling `run` here would secretly
-//! measure `work + tprobe` instead of `work` alone.
+//! Uses [`RuntimeZC::run`] (the probe-free default), not
+//! [`RuntimeZC::run_probed`] — the lesson from `goal2-crit`'s
+//! probe contamination is the reason the probe-free path is the
+//! default. Calling `run_probed` here would secretly measure
+//! `work + tprobe` instead of `work` alone.
 //!
 //! Shape note. `RuntimeZC` is wall-clock driven — actor threads
 //! ping-pong freely for a caller-supplied duration; there is no
@@ -73,7 +74,7 @@ fn bench_goalzc(c: &mut Criterion) {
 
             let warmup = Duration::from_millis(50);
             let measurement = Duration::from_millis(100);
-            let counts = rt.run_no_probe(&mut mgr, initial, warmup, measurement, &[]);
+            let counts = rt.run(&mut mgr, initial, warmup, measurement, &[]);
 
             let total_count: u64 = counts.iter().sum();
             // Scale: `measurement` of wall time produced

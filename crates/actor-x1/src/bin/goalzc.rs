@@ -154,7 +154,7 @@ fn main() {
             }
         },
     };
-    let results = rt.run(&mut mgr, initial, warmup, measurement, &pin_cores);
+    let results = rt.run_probed(&mut mgr, initial, warmup, measurement, &pin_cores);
 
     let total_count: u64 = results.iter().map(|(c, _)| *c).sum();
     let mmps = total_count as f64 / cli.duration_s / 1e6;

@@ -40,8 +40,8 @@ cargo bench --bench goalzc-crit
   goal1's `--inner` knob.
 - `goal2-crit` runs a single two-thread mpsc ping-pong shape.
 - `goalzc-crit` runs the zerocopy ping-pong shape via
-  `RuntimeZC::run_no_probe` so the measurement is
-  probe-clean. Smoke-bench scope: regression insurance for
+  `RuntimeZC::run` (probe-free default) so the measurement
+  is probe-clean. Smoke-bench scope: regression insurance for
   the pool-backed payload path, not fidelity-perfect
   agreement with the `goalzc` binary (the bench's
   fresh-runtime-per-sample shape never reaches `goalzc`'s

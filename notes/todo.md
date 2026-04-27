@@ -95,6 +95,7 @@ and older `## Done` sections are moved to [done.md](done.md) to keep this file s
 - Comma-format summary counts (0.3.2) [[17]]
 - Criterion benchmarks for goal1/goal2 (0.4.0) [[19]]
 - goalzc + RuntimeZC: pooled zerocopy ping-pong (0.5.0) [[23]],[[20]],[[21]],[[22]]
+- Rename `run_no_probe` → `run`, `run` → `run_probed` (0.5.1) [[24]]
 
 
 # References
@@ -122,3 +123,4 @@ and older `## Done` sections are moved to [done.md](done.md) to keep this file s
 [21]: chores-02.md#hand-off--closing-the-050-ladder-post-050-2
 [22]: chores-02.md#multi-step-ladder-goalzc--runtimezc
 [23]: chores-02.md#goalzc--runtimezc-pooled-zerocopy-ping-pong-050
+[24]: chores-02.md#rename-run_no_probe--run-run--run_probed-051
