@@ -7,44 +7,27 @@
 //! transports (M:N scheduler, alternative channel types, …)
 //! would be peers.
 //!
-//! Responsibilities held here:
+//! Two API styles in this version:
 //!
-//! - Owns the [`Pool<S>`]; spawns actor threads; wires
-//!   per-actor `mpsc` channels; runs the warmup / measure /
-//!   shutdown lifecycle.
-//! - Knows nothing about "seeds", named lookups, or what a
-//!   benchmark is. Initial messages are passed to
-//!   [`RuntimeZC::run`] directly by the app; the runtime
-//!   delivers them after spawn / before warmup, then forgets.
-//! - Drains the manager via [`ActorManager::take_actors`] +
-//!   [`ActorManager::probe_name_prefix`] when `run` is called.
-//!
-//! Two run entry points on [`RuntimeZC`]:
-//!
-//! - [`RuntimeZC::run`] — probe-free; returns `count` per
-//!   actor. The default measurement primitive (used by the
-//!   `goalzc-crit` criterion bench so measurement is not
-//!   contaminated by probe overhead).
-//! - [`RuntimeZC::run_probed`] — `tprobe`-instrumented;
-//!   returns `(count, TProbe)` per actor. Opt-in for
-//!   diagnostic instrumentation (used by the `goalzc` binary).
-//!
-//! Lifecycle inside `run` / `run_probed`:
-//!
-//! - Drain actors from the Manager.
-//! - Build per-actor channels.
-//! - Spawn one thread per actor, optionally pinned.
-//! - Deliver `initial_messages` over the senders.
-//! - Sleep `warmup`.
-//! - Send `ClearProbe` to every actor.
-//! - Sleep `measurement`.
-//! - Send `Shutdown` to every actor.
-//! - Drop main-thread senders so the channels close.
-//! - Join, return per-actor results.
+//! - **Lifecycle (preferred, new in `0.6.0-1`)**: caller
+//!   composes [`RuntimeZC::startup`] →
+//!   [`Handle::run`] (any number of windows) →
+//!   [`Handle::stop`]. `stop` returns the aggregate `u64`
+//!   message count across all actor threads. Probe-free;
+//!   diagnostic instrumentation will re-enter post-`0.6.0`
+//!   via an actor-wrapper trait or `TProbe::Counter`.
+//! - **All-in-one (legacy, removed in `0.6.0-3`)**:
+//!   [`RuntimeZC::run`] (probe-free, returns per-actor
+//!   counts) and [`RuntimeZC::run_probed`] (probe-
+//!   instrumented, returns per-actor `(count, TProbe)`).
+//!   These manage their own warmup → measurement → shutdown
+//!   internally; the warmup boundary issues `ClearProbe` so
+//!   counts and the histogram only see steady-state data.
 //!
 //! Drain invariant: by the time the join completes, every
 //! [`PooledMsg`] that was ever in flight has been dropped, so
-//! `pool.free_len() == pool.size()`.
+//! `pool.free_len() == pool.size()`. Holds for both API
+//! styles.
 
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
@@ -155,25 +138,27 @@ impl<S: BufRefStore + 'static> RuntimeZC<S> {
         )
     }
 
-    /// Shared orchestration body.
+    /// Spawn actor threads and deliver initial messages.
+    /// Shared startup logic for [`RuntimeZC::run`] /
+    /// [`RuntimeZC::run_probed`] (legacy all-in-one) and
+    /// [`RuntimeZC::startup`] (lifecycle).
     ///
-    /// - Drains the manager, builds channels, spawns one
-    ///   thread per actor, delivers initial messages, runs
-    ///   the warmup / measure / shutdown lifecycle, joins,
-    ///   and returns per-actor results.
-    /// - Per-thread work is delegated to `actor_loop`, a
-    ///   function pointer (`ActorLoopFn<S, R>`) so this method
-    ///   monomorphizes per `R` without the closure / `Fn`-bound
-    ///   overhead.
-    fn run_inner<R: Send + 'static>(
-        &mut self,
+    /// - Drains the manager's actors via
+    ///   [`ActorManager::take_actors`].
+    /// - Builds one `mpsc` channel per actor; spawns one
+    ///   thread per actor running `actor_loop`, optionally
+    ///   pinned via `pin_cores[id % pin_cores.len()]`.
+    /// - Sends `initial_messages` over the per-actor
+    ///   senders before returning.
+    /// - Returns the senders (for `ClearProbe` / `Shutdown`
+    ///   signaling) and join handles (for the eventual join).
+    fn spawn_and_seed<R: Send + 'static>(
+        &self,
         mgr: &mut ActorManager<S>,
         initial_messages: Vec<(u32, PooledMsg<S>)>,
-        warmup: Duration,
-        measurement: Duration,
         pin_cores: &[usize],
         actor_loop: ActorLoopFn<S, R>,
-    ) -> Vec<R> {
+    ) -> (Vec<Sender<SignalZC<S>>>, Vec<JoinHandle<R>>) {
         let actors = mgr.take_actors();
         let n = actors.len();
         let pool = self.pool.clone();
@@ -218,6 +203,32 @@ impl<S: BufRefStore + 'static> RuntimeZC<S> {
             senders[dst as usize].send(SignalZC::User(msg)).unwrap();
         }
 
+        (senders, handles)
+    }
+
+    /// Shared orchestration body for the legacy all-in-one
+    /// [`RuntimeZC::run`] / [`RuntimeZC::run_probed`].
+    ///
+    /// - Calls [`Self::spawn_and_seed`] to spawn threads and
+    ///   deliver initial messages.
+    /// - Sleeps `warmup`, sends `ClearProbe` to every actor,
+    ///   sleeps `measurement`, sends `Shutdown`, drops senders,
+    ///   joins, returns per-actor results.
+    /// - Per-thread work is delegated to `actor_loop`, a
+    ///   function pointer (`ActorLoopFn<S, R>`) so this method
+    ///   monomorphizes per `R` without the closure / `Fn`-bound
+    ///   overhead.
+    fn run_inner<R: Send + 'static>(
+        &mut self,
+        mgr: &mut ActorManager<S>,
+        initial_messages: Vec<(u32, PooledMsg<S>)>,
+        warmup: Duration,
+        measurement: Duration,
+        pin_cores: &[usize],
+        actor_loop: ActorLoopFn<S, R>,
+    ) -> Vec<R> {
+        let (senders, handles) = self.spawn_and_seed(mgr, initial_messages, pin_cores, actor_loop);
+
         thread::sleep(warmup);
         for tx in &senders {
             let _ = tx.send(SignalZC::ClearProbe);
@@ -229,11 +240,115 @@ impl<S: BufRefStore + 'static> RuntimeZC<S> {
         }
         drop(senders);
 
-        let mut results = Vec::with_capacity(n);
+        let mut results = Vec::with_capacity(handles.len());
         for h in handles {
             results.push(h.join().expect("actor thread panicked"));
         }
         results
+    }
+
+    /// Spawn actor threads and deliver initial messages,
+    /// returning a [`Handle`] that owns the actor mesh.
+    ///
+    /// - The caller drives the lifecycle from there:
+    ///   [`Handle::run`] sleeps a window (any number of
+    ///   times); [`Handle::stop`] sends `Shutdown`, joins,
+    ///   and returns the aggregate `u64` count.
+    /// - No probe support — counts only. Probing re-enters
+    ///   post-`0.6.0` via an actor-wrapper trait or
+    ///   `TProbe::Counter`.
+    /// - On `Drop` without `stop`, the handle does a silent
+    ///   shutdown (panics on actor threads are swallowed).
+    pub fn startup(
+        &mut self,
+        mgr: &mut ActorManager<S>,
+        initial_messages: Vec<(u32, PooledMsg<S>)>,
+        pin_cores: &[usize],
+    ) -> Handle<S> {
+        let (senders, handles) =
+            self.spawn_and_seed(mgr, initial_messages, pin_cores, actor_loop::<S>);
+        Handle {
+            senders: Some(senders),
+            handles: Some(handles),
+            pool: self.pool.clone(),
+        }
+    }
+}
+
+/// Live handle to actor threads spawned by
+/// [`RuntimeZC::startup`].
+///
+/// - Holds the per-actor senders and join handles plus a
+///   clone of the runtime's pool.
+/// - [`Handle::run`] sleeps a window; actor threads continue
+///   processing messages in the meantime. May be called any
+///   number of times before `stop`.
+/// - [`Handle::stop`] sends `Shutdown` to every actor, joins
+///   all threads, and returns the aggregate `u64` count
+///   (sum of per-thread local counters, no atomics in the
+///   hot path).
+/// - On `Drop` without `stop`, sends `Shutdown` and joins
+///   silently (panics on actor threads are swallowed; drop
+///   must not panic-during-drop).
+pub struct Handle<S: BufRefStore = MutexLifo> {
+    senders: Option<Vec<Sender<SignalZC<S>>>>,
+    handles: Option<Vec<JoinHandle<u64>>>,
+    pool: Pool<S>,
+}
+
+impl<S: BufRefStore> Handle<S> {
+    /// Sleep for `window`. Actor threads continue processing
+    /// messages while the caller sleeps; counts accumulate
+    /// in their per-thread local `u64`s.
+    pub fn run(&self, window: Duration) {
+        thread::sleep(window);
+    }
+
+    /// Borrow the runtime's pool handle (for ad-hoc post-
+    /// startup `get_msg` / inspection).
+    pub fn pool(&self) -> &Pool<S> {
+        &self.pool
+    }
+
+    /// Send `Shutdown` to every actor, join all threads, and
+    /// return the aggregate per-actor message count.
+    ///
+    /// - Panics if any actor thread panicked. To swallow
+    ///   panics (and skip the count), drop the handle
+    ///   instead of calling `stop`.
+    pub fn stop(mut self) -> u64 {
+        let mut total: u64 = 0;
+        if let Some(senders) = self.senders.take() {
+            for tx in &senders {
+                let _ = tx.send(SignalZC::Shutdown);
+            }
+            drop(senders);
+        }
+        if let Some(handles) = self.handles.take() {
+            for h in handles {
+                total = total.saturating_add(h.join().expect("actor thread panicked"));
+            }
+        }
+        total
+    }
+}
+
+impl<S: BufRefStore> Drop for Handle<S> {
+    /// Silent graceful shutdown when [`Handle::stop`] was
+    /// not called: send `Shutdown`, join all threads,
+    /// discard counts and any panics.
+    fn drop(&mut self) {
+        if let Some(senders) = self.senders.take() {
+            for tx in &senders {
+                let _ = tx.send(SignalZC::Shutdown);
+            }
+            drop(senders);
+        }
+        if let Some(handles) = self.handles.take() {
+            for h in handles {
+                let _ = h.join();
+            }
+        }
     }
 }
 
@@ -451,5 +566,85 @@ mod tests {
         let rt = RuntimeZC::new(pool.clone());
         assert_eq!(rt.pool().msg_size(), 32);
         assert_eq!(rt.pool().size(), 2);
+    }
+
+    /// Lifecycle round trip: `startup` → `run` (one window)
+    /// → `stop` returns the aggregate count and drains the
+    /// pool.
+    #[test]
+    fn lifecycle_round_trip_returns_total() {
+        let pool: Pool = Pool::new(64, 4);
+        let mut rt = RuntimeZC::new(pool.clone());
+        let mut mgr = ActorManager::new("test.lifecycle");
+        let a = mgr.add(PingPong { peer: 1 });
+        let _b = mgr.add(PingPong { peer: 0 });
+        let initial = vec![(a, pool.get_msg(8).expect("seed"))];
+        let handle = rt.startup(&mut mgr, initial, &[]);
+        handle.run(Duration::from_millis(40));
+        let total = handle.stop();
+        assert!(total > 0, "expected nonzero total, got {total}");
+        assert_eq!(
+            pool.free_len(),
+            pool.size(),
+            "all buffers should return to pool after stop"
+        );
+    }
+
+    /// `Handle::run` may be called multiple times before
+    /// `stop`; the aggregate count covers all windows.
+    #[test]
+    fn lifecycle_multiple_run_windows_accumulate() {
+        let pool: Pool = Pool::new(64, 4);
+        let mut rt = RuntimeZC::new(pool.clone());
+        let mut mgr = ActorManager::new("test.multi");
+        let a = mgr.add(PingPong { peer: 1 });
+        let _b = mgr.add(PingPong { peer: 0 });
+        let initial = vec![(a, pool.get_msg(8).expect("seed"))];
+        let handle = rt.startup(&mut mgr, initial, &[]);
+        handle.run(Duration::from_millis(20));
+        handle.run(Duration::from_millis(20));
+        let total = handle.stop();
+        assert!(total > 0, "expected nonzero total, got {total}");
+    }
+
+    /// `Handle::pool` exposes the runtime's pool handle so
+    /// callers can build ad-hoc messages post-startup
+    /// without keeping a separate clone.
+    #[test]
+    fn lifecycle_handle_pool_accessor() {
+        let pool: Pool = Pool::new(32, 4);
+        let mut rt = RuntimeZC::new(pool.clone());
+        let mut mgr = ActorManager::new("test.handle.pool");
+        let a = mgr.add(PingPong { peer: 1 });
+        let _b = mgr.add(PingPong { peer: 0 });
+        let initial = vec![(a, pool.get_msg(8).expect("seed"))];
+        let handle = rt.startup(&mut mgr, initial, &[]);
+        assert_eq!(handle.pool().msg_size(), 32);
+        assert_eq!(handle.pool().size(), 4);
+        handle.run(Duration::from_millis(20));
+        let _ = handle.stop();
+    }
+
+    /// Dropping `Handle` without calling `stop` performs a
+    /// silent graceful shutdown: actors finish, threads
+    /// join, pool drains.
+    #[test]
+    fn lifecycle_handle_drop_shuts_down_cleanly() {
+        let pool: Pool = Pool::new(64, 4);
+        let mut rt = RuntimeZC::new(pool.clone());
+        let mut mgr = ActorManager::new("test.drop");
+        let a = mgr.add(PingPong { peer: 1 });
+        let _b = mgr.add(PingPong { peer: 0 });
+        let initial = vec![(a, pool.get_msg(8).expect("seed"))];
+        {
+            let handle = rt.startup(&mut mgr, initial, &[]);
+            handle.run(Duration::from_millis(20));
+            // drop without stop — shutdown happens in Drop.
+        }
+        assert_eq!(
+            pool.free_len(),
+            pool.size(),
+            "all buffers should return to pool after drop"
+        );
     }
 }

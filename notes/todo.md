@@ -7,7 +7,7 @@ and reference links to more details.
 
 - RuntimeZC lifecycle: startup / run / stop (0.6.0) [[25]]
   - 0.6.0-0 plan marker — done
-  - 0.6.0-1 `Handle` + lifecycle methods — pending
+  - 0.6.0-1 `Handle` + lifecycle methods — done
   - 0.6.0-2 migrate `goalzc` / `goalzc-crit` — pending
   - 0.6.0-3 remove old `run` / `run_probed` — pending
   - 0.6.0 close — pending
