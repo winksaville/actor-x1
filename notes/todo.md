@@ -5,7 +5,12 @@ and reference links to more details.
 
 ## In Progress
 
-(none)
+- RuntimeZC lifecycle: startup / run / stop (0.6.0) [[25]]
+  - 0.6.0-0 plan marker — done
+  - 0.6.0-1 `Handle` + lifecycle methods — pending
+  - 0.6.0-2 migrate `goalzc` / `goalzc-crit` — pending
+  - 0.6.0-3 remove old `run` / `run_probed` — pending
+  - 0.6.0 close — pending
 
 ## Todo
 
@@ -124,3 +129,4 @@ and older `## Done` sections are moved to [done.md](done.md) to keep this file s
 [22]: chores-02.md#multi-step-ladder-goalzc--runtimezc
 [23]: chores-02.md#goalzc--runtimezc-pooled-zerocopy-ping-pong-050
 [24]: chores-02.md#rename-run_no_probe--run-run--run_probed-051
+[25]: chores-03.md#runtimezc-lifecycle-startup--run--stop--plan-marker-060-0
